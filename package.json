@@ -1,0 +1,25 @@
+{
+  "name": "grahamssimulations",
+  "version": "1.0.0",
+  "description": "A collection of my simulations using Javascript, HTML, CSS, and Python",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate": "node generateGallery.js",
+    "build": "npm run generate"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grahamwaters/GrahamsSimulations.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/grahamwaters/GrahamsSimulations/issues"
+  },
+  "homepage": "https://github.com/grahamwaters/GrahamsSimulations#readme",
+  "dependencies": {
+    "puppeteer": "^23.11.1"
+  }
+}
