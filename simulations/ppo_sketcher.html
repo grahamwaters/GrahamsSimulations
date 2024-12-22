@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PPO Agent Learning to Draw Shapes</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        #controls {
+            margin-bottom: 20px;
+        }
+        #shapeSelect {
+            padding: 10px;
+            font-size: 16px;
+        }
+        #startButton {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        #canvasContainer {
+            display: inline-block;
+            position: relative;
+            border: 2px solid #333;
+            background-color: #fff;
+        }
+        #progress {
+            width: 80%;
+            background-color: #ddd;
+            margin: 20px auto;
+            height: 25px;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #progressBar {
+            height: 100%;
+            width: 0%;
+            background-color: #4caf50;
+            transition: width 0.3s;
+        }
+        #episodeCounter {
+            margin-top: 10px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>PPO Agent Learning to Draw Shapes</h1>
+
+    <div id="controls">
+        <select id="shapeSelect">
+            <option value="triangle">Triangle</option>
+            <option value="circle">Circle</option>
+            <option value="square">Square</option>
+        </select>
+        <button id="startButton">Start Learning</button>
+    </div>
+
+    <div id="canvasContainer">
+        <canvas id="drawingCanvas" width="500" height="500"></canvas>
+    </div>
+
+    <div id="progress">
+        <div id="progressBar"></div>
+    </div>
+    <div id="episodeCounter">Episode: 0</div>
+
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const shapeSelect = document.getElementById('shapeSelect');
+        const progressBar = document.getElementById('progressBar');
+        const episodeCounter = document.getElementById('episodeCounter');
+
+        const TOTAL_EPISODES = 100;
+        let currentEpisode = 0;
+        let targetShape = 'triangle';
+        let agentParams = {};
+
+        // Define target shapes as set of points
+        const shapes = {
+            triangle: [
+                {x: 250, y: 100},
+                {x: 150, y: 400},
+                {x: 350, y: 400},
+                {x: 250, y: 100}
+            ],
+            square: [
+                {x: 150, y: 150},
+                {x: 350, y: 150},
+                {x: 350, y: 350},
+                {x: 150, y: 350},
+                {x: 150, y: 150}
+            ],
+            circle: (function() {
+                const points = [];
+                const centerX = 250;
+                const centerY = 250;
+                const radius = 150;
+                const segments = 100;
+                for(let i=0; i<=segments; i++) {
+                    const angle = (i / segments) * 2 * Math.PI;
+                    points.push({
+                        x: centerX + radius * Math.cos(angle),
+                        y: centerY + radius * Math.sin(angle)
+                    });
+                }
+                return points;
+            })()
+        };
+
+        // Initialize agent's parameters randomly
+        function initializeAgent(shape) {
+            const target = shapes[shape];
+            agentParams = target.map(point => ({
+                x: point.x + (Math.random() - 0.5) * 100,
+                y: point.y + (Math.random() - 0.5) * 100
+            }));
+        }
+
+        // Calculate reward based on distance to target
+        function calculateReward(agentPoints, targetPoints) {
+            let totalDistance = 0;
+            for(let i=0; i < agentPoints.length; i++) {
+                const dx = agentPoints[i].x - targetPoints[i].x;
+                const dy = agentPoints[i].y - targetPoints[i].y;
+                totalDistance += Math.sqrt(dx*dx + dy*dy);
+            }
+            // Lower distance => higher reward
+            return -totalDistance;
+        }
+
+        // Update agent's parameters (simple gradient descent simulation)
+        function updateAgent(agentPoints, targetPoints, learningRate) {
+            for(let i=0; i < agentPoints.length; i++) {
+                const dx = targetPoints[i].x - agentPoints[i].x;
+                const dy = targetPoints[i].y - agentPoints[i].y;
+                agentPoints[i].x += dx * learningRate;
+                agentPoints[i].y += dy * learningRate;
+            }
+        }
+
+        // Draw the agent's current drawing
+        function draw(agentPoints) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.moveTo(agentPoints[0].x, agentPoints[0].y);
+            for(let i=1; i < agentPoints.length; i++) {
+                ctx.lineTo(agentPoints[i].x, agentPoints[i].y);
+            }
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Draw the target shape
+        function drawTarget(shape) {
+            const target = shapes[shape];
+            ctx.beginPath();
+            ctx.moveTo(target[0].x, target[0].y);
+            for(let i=1; i < target.length; i++) {
+                ctx.lineTo(target[i].x, target[i].y);
+            }
+            ctx.strokeStyle = '#0000ff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Learning loop
+        async function learn() {
+            startButton.disabled = true;
+            shapeSelect.disabled = true;
+            targetShape = shapeSelect.value;
+            initializeAgent(targetShape);
+            currentEpisode = 0;
+            progressBar.style.width = '0%';
+            episodeCounter.textContent = `Episode: ${currentEpisode}`;
+
+            const target = shapes[targetShape];
+            const episodes = TOTAL_EPISODES;
+
+            for(let episode=1; episode<=episodes; episode++) {
+                // Simulate action: agent draws based on current parameters
+                // In real PPO, here the agent would take actions based on policy
+                // Here we simulate by adjusting agent's points towards target
+
+                // Calculate reward
+                const reward = calculateReward(agentParams, target);
+
+                // Update agent's parameters
+                const learningRate = 0.05; // Simulated learning rate
+                updateAgent(agentParams, target, learningRate);
+
+                // Draw current agent's attempt
+                draw(agentParams);
+
+                // Optionally, draw the target shape for reference
+                drawTarget(targetShape);
+
+                // Update progress
+                currentEpisode = episode;
+                progressBar.style.width = `${(episode / episodes) * 100}%`;
+                episodeCounter.textContent = `Episode: ${currentEpisode}`;
+
+                // Wait for a short time to visualize learning
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            startButton.disabled = false;
+            shapeSelect.disabled = false;
+            alert('Learning complete!');
+        }
+
+        startButton.addEventListener('click', () => {
+            learn();
+        });
+
+        // Initial drawing
+        drawTarget('triangle');
+    </script>
+
+</body>
+</html>

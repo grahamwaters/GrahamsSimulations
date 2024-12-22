@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Real PPO Agent Learning to Draw Shapes</title>
+    <!-- TensorFlow.js Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.0.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        #controls {
+            margin-bottom: 20px;
+        }
+        #shapeSelect {
+            padding: 10px;
+            font-size: 16px;
+        }
+        #startButton {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        #canvasContainer {
+            display: inline-block;
+            position: relative;
+            border: 2px solid #333;
+            background-color: #fff;
+        }
+        #progress {
+            width: 80%;
+            background-color: #ddd;
+            margin: 20px auto;
+            height: 25px;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #progressBar {
+            height: 100%;
+            width: 0%;
+            background-color: #4caf50;
+            transition: width 0.3s;
+        }
+        #episodeCounter {
+            margin-top: 10px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Real PPO Agent Learning to Draw Shapes</h1>
+
+    <div id="controls">
+        <select id="shapeSelect">
+            <option value="triangle">Triangle</option>
+            <option value="circle">Circle</option>
+            <option value="square">Square</option>
+        </select>
+        <button id="startButton">Start Learning</button>
+    </div>
+
+    <div id="canvasContainer">
+        <canvas id="drawingCanvas" width="500" height="500"></canvas>
+    </div>
+
+    <div id="progress">
+        <div id="progressBar"></div>
+    </div>
+    <div id="episodeCounter">Episode: 0</div>
+
+    <script>
+        // Import TensorFlow.js
+        const tf = window.tf;
+
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const shapeSelect = document.getElementById('shapeSelect');
+        const progressBar = document.getElementById('progressBar');
+        const episodeCounter = document.getElementById('episodeCounter');
+
+        const TOTAL_EPISODES = 500; // Increased for better learning
+        let currentEpisode = 0;
+        let targetShape = 'triangle';
+
+        // Define target shapes as set of points
+        const shapes = {
+            triangle: [
+                {x: 250, y: 100},
+                {x: 150, y: 400},
+                {x: 350, y: 400},
+                {x: 250, y: 100}
+            ],
+            square: [
+                {x: 150, y: 150},
+                {x: 350, y: 150},
+                {x: 350, y: 350},
+                {x: 150, y: 350},
+                {x: 150, y: 150}
+            ],
+            circle: (function() {
+                const points = [];
+                const centerX = 250;
+                const centerY = 250;
+                const radius = 150;
+                const segments = 100;
+                for(let i=0; i<=segments; i++) {
+                    const angle = (i / segments) * 2 * Math.PI;
+                    points.push({
+                        x: centerX + radius * Math.cos(angle),
+                        y: centerY + radius * Math.sin(angle)
+                    });
+                }
+                return points;
+            })()
+        };
+
+        // Normalize points
+        function normalizePoints(points) {
+            // Normalize coordinates to [0,1]
+            return points.map(p => ({x: p.x / canvas.width, y: p.y / canvas.height}));
+        }
+
+        // Denormalize points
+        function denormalizePoints(points) {
+            return points.map(p => ({x: p.x * canvas.width, y: p.y * canvas.height}));
+        }
+
+        // Initialize the PPO Agent
+        class PPOAgent {
+            constructor(inputSize, outputSize, options = {}) {
+                this.gamma = options.gamma || 0.99;
+                this.epsilon = options.epsilon || 0.2;
+                this.lr = options.lr || 0.001;
+                this.clip = options.clip || 0.2;
+                this.valueCoef = options.valueCoef || 0.5;
+                this.entropyCoef = options.entropyCoef || 0.01;
+
+                // Policy network
+                this.policyNetwork = this.createModel(inputSize, outputSize);
+                // Value network
+                this.valueNetwork = this.createModel(inputSize, 1);
+
+                // Optimizers
+                this.policyOptimizer = tf.train.adam(this.lr);
+                this.valueOptimizer = tf.train.adam(this.lr);
+            }
+
+            createModel(inputSize, outputSize) {
+                const model = tf.sequential();
+                model.add(tf.layers.dense({inputShape: [inputSize], units: 128, activation: 'relu'}));
+                model.add(tf.layers.dense({units: 128, activation: 'relu'}));
+                model.add(tf.layers.dense({units: outputSize, activation: 'tanh'})); // Output between -1 and 1
+                return model;
+            }
+
+            async chooseAction(state) {
+                const stateTensor = tf.tensor2d([state]);
+                const action = this.policyNetwork.predict(stateTensor).dataSync();
+                stateTensor.dispose();
+                return Array.from(action);
+            }
+
+            async getValue(state) {
+                const stateTensor = tf.tensor2d([state]);
+                const value = this.valueNetwork.predict(stateTensor).dataSync()[0];
+                stateTensor.dispose();
+                return value;
+            }
+
+            async train(states, actions, rewards, dones, nextStates, advantages) {
+                const statesTensor = tf.tensor2d(states);
+                const actionsTensor = tf.tensor2d(actions);
+                const advantagesTensor = tf.tensor2d(advantages, [advantages.length, 1]);
+
+                // Update policy
+                await this.policyOptimizer.minimize(() => {
+                    const logits = this.policyNetwork.predict(statesTensor);
+                    const logProb = tf.losses.meanSquaredError(actionsTensor, logits);
+                    const policyLoss = tf.mean(logProb.mul(-1).mul(advantagesTensor));
+                    return policyLoss;
+                }, true);
+
+                // Update value function
+                const values = this.valueNetwork.predict(statesTensor);
+                const valueLoss = tf.losses.meanSquaredError(rewards, values);
+                await this.valueOptimizer.minimize(() => valueLoss, true);
+
+                statesTensor.dispose();
+                actionsTensor.dispose();
+                advantagesTensor.dispose();
+            }
+        }
+
+        // Initialize Agent
+        let agent;
+
+        // Preprocess target shape
+        let targetPoints = [];
+        let targetNormalized = [];
+
+        // Drawing functions
+        function drawAgent(agentPoints) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Draw target shape
+            ctx.beginPath();
+            ctx.moveTo(targetPoints[0].x, targetPoints[0].y);
+            for(let i=1; i < targetPoints.length; i++) {
+                ctx.lineTo(targetPoints[i].x, targetPoints[i].y);
+            }
+            ctx.strokeStyle = '#0000ff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw agent's shape
+            ctx.beginPath();
+            ctx.moveTo(agentPoints[0].x, agentPoints[0].y);
+            for(let i=1; i < agentPoints.length; i++) {
+                ctx.lineTo(agentPoints[i].x, agentPoints[i].y);
+            }
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Calculate Mean Squared Error as reward (negative)
+        function calculateReward(agentPoints, targetPoints) {
+            let total = 0;
+            for(let i=0; i < agentPoints.length; i++) {
+                const dx = agentPoints[i].x - targetPoints[i].x;
+                const dy = agentPoints[i].y - targetPoints[i].y;
+                total += dx * dx + dy * dy;
+            }
+            return -total;
+        }
+
+        // Initialize agent's parameters
+        function initializeAgent() {
+            // Number of points
+            const numPoints = targetNormalized.length;
+            // Initialize agent's points randomly
+            const initialState = [];
+            for(let i=0; i < numPoints * 2; i++) { // x and y for each point
+                initialState.push(Math.random() * 2 - 1); // Initialize between -1 and 1
+            }
+            return initialState;
+        }
+
+        // Convert agent state to points
+        function stateToPoints(state) {
+            const points = [];
+            for(let i=0; i < state.length; i += 2) {
+                points.push({
+                    x: (state[i] + 1) / 2 * canvas.width,
+                    y: (state[i+1] + 1) / 2 * canvas.height
+                });
+            }
+            return points;
+        }
+
+        // Main Learning Loop
+        async function learn() {
+            startButton.disabled = true;
+            shapeSelect.disabled = true;
+            targetShape = shapeSelect.value;
+            targetPoints = shapes[targetShape];
+            targetNormalized = normalizePoints(targetPoints);
+
+            // Initialize Agent
+            const inputSize = targetNormalized.length * 2; // x and y for each point
+            const outputSize = targetNormalized.length * 2;
+            agent = new PPOAgent(inputSize, outputSize, {lr: 0.001});
+
+            currentEpisode = 0;
+            progressBar.style.width = '0%';
+            episodeCounter.textContent = `Episode: ${currentEpisode}`;
+
+            // Training parameters
+            const batchSize = 10;
+            const episodes = TOTAL_EPISODES;
+
+            for(let episode=1; episode<=episodes; episode++) {
+                // Initialize state
+                let state = initializeAgent();
+                let done = false;
+                let totalReward = 0;
+
+                // Agent chooses action
+                const action = await agent.chooseAction(state);
+                // Clip action to [-1,1]
+                const clippedAction = action.map(a => Math.max(-1, Math.min(1, a)));
+
+                // Convert action to points
+                const agentPoints = stateToPoints(clippedAction);
+
+                // Calculate reward
+                const reward = calculateReward(agentPoints, targetPoints);
+                totalReward += reward;
+
+                // Collect experience
+                // For simplicity, we'll treat each episode as a single step
+                // In a more complex environment, you'd have multiple steps per episode
+
+                // Compute advantage (here simplified as reward)
+                const advantage = reward;
+
+                // Prepare training data
+                const states = [state];
+                const actionsArr = [clippedAction];
+                const rewards = [reward];
+                const dones = [done];
+                const nextStates = [state]; // No state transition in this simple example
+                const advantages = [advantage];
+
+                // Train the agent
+                await agent.train(states, actionsArr, rewards, dones, nextStates, advantages);
+
+                // Draw the agent's attempt
+                drawAgent(agentPoints);
+
+                // Update progress
+                currentEpisode = episode;
+                progressBar.style.width = `${(episode / episodes) * 100}%`;
+                episodeCounter.textContent = `Episode: ${currentEpisode}`;
+
+                // Wait a short time to visualize learning
+                await new Promise(resolve => setTimeout(resolve, 10));
+
+                // Early stopping if reward is good enough
+                if (reward > -1000) { // Arbitrary threshold
+                    console.log('Early stopping at episode', episode);
+                    break;
+                }
+            }
+
+            startButton.disabled = false;
+            shapeSelect.disabled = false;
+            alert('Learning complete!');
+        }
+
+        startButton.addEventListener('click', () => {
+            learn();
+        });
+
+        // Initial drawing
+        targetPoints = shapes['triangle'];
+        targetNormalized = normalizePoints(targetPoints);
+        drawAgent(stateToPoints(initializeAgent()));
+    </script>
+
+</body>
+</html>
