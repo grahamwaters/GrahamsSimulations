@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>RL Stick Figures - Policy Gradients</title>
+    <!-- p5.js for rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.6.0/lib/p5.min.js"></script>
+
+    <!-- Matter.js for physics -->
+    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+
+    <!-- TensorFlow.js for ML -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+
+    <!-- dat.GUI for UI controls -->
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #f0f0f0;
+            font-family: sans-serif;
+        }
+        #gui-container {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            background: rgba(255,255,255,0.8);
+            padding: 5px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+<div id="gui-container"></div>
+<div id="info"></div>
+<script>
+// ============================================================
+// Global Variables and Setup
+// ============================================================
+let canvasWidth = window.innerWidth;
+let canvasHeight = window.innerHeight;
+
+let engine, world;
+let ground;
+let objects = [];
+
+// Multiple agents
+let agents = [];
+let numAgents = 3; // number of stick figure agents
+
+// RL and environment parameters
+let envParams = {
+    gravity: 1.0,
+    learningRate: 0.001,
+    epochs: 5, // number of epochs to train
+    episodesPerEpoch: 10, // how many episodes per epoch
+    stepsPerEpisode: 400,
+    resetSimulation: () => resetEnvironment(),
+    startTraining: () => { startTraining(); }
+};
+
+// RL-related variables
+let currentEpoch = 0;
+let currentEpisode = 0;
+let currentStep = 0;
+let trainingInProgress = false;
+
+// Policy model and optimizer
+let policyModel;
+let optimizer;
+
+// Trajectories for policy gradient updates
+let trajectories = [];
+
+// Track episode returns to visualize learning
+let episodeReturns = [];
+let episodeReturn = 0;
+
+// UI and info display
+let gui;
+let infoDiv;
+
+// Exploration noise
+const actionStd = 0.1;
+const twoPi = Math.sqrt(2 * Math.PI);
+
+// ============================================================
+// Stick Figure Class
+// ============================================================
+
+class StickFigure {
+    constructor(x, y, world) {
+        this.world = world;
+
+        // Body parts
+        this.torso = Matter.Bodies.rectangle(x, y, 20, 60, {friction: 0.1});
+        this.leftLeg = Matter.Bodies.rectangle(x - 10, y + 40, 10, 40, {friction: 0.4});
+        this.rightLeg = Matter.Bodies.rectangle(x + 10, y + 40, 10, 40, {friction: 0.4});
+
+        Matter.World.add(world, [this.torso, this.leftLeg, this.rightLeg]);
+
+        // Joints
+        this.leftHip = Matter.Constraint.create({
+            bodyA: this.torso,
+            pointA: {x: -5, y: 30},
+            bodyB: this.leftLeg,
+            pointB: {x: 0, y: -20},
+            stiffness: 0.9,
+            length: 0
+        });
+
+        this.rightHip = Matter.Constraint.create({
+            bodyA: this.torso,
+            pointA: {x: 5, y: 30},
+            bodyB: this.rightLeg,
+            pointB: {x: 0, y: -20},
+            stiffness: 0.9,
+            length: 0
+        });
+
+        Matter.World.add(world, [this.leftHip, this.rightHip]);
+
+        this.isAlive = true;
+    }
+
+    display() {
+        fill(50, 50, 200);
+        drawBody(this.torso);
+        fill(50, 200, 50);
+        drawBody(this.leftLeg);
+        fill(200, 50, 50);
+        drawBody(this.rightLeg);
+    }
+
+    getState() {
+        let torsoAngle = this.torso.angle;
+        let leftAngle = this.computeAngleBetweenBodies(this.torso, this.leftLeg);
+        let rightAngle = this.computeAngleBetweenBodies(this.torso, this.rightLeg);
+
+        return [
+            this.torso.position.x / canvasWidth,
+            this.torso.position.y / canvasHeight,
+            torsoAngle,
+            leftAngle,
+            rightAngle,
+            this.torso.velocity.x,
+            this.torso.velocity.y
+        ];
+    }
+
+    computeAngleBetweenBodies(bodyA, bodyB) {
+        let angleA = bodyA.angle;
+        let angleB = bodyB.angle;
+        return angleB - angleA;
+    }
+
+    applyAction(action) {
+        let torqueLeft = action[0];
+        let torqueRight = action[1];
+        this.applyJointTorque('leftHip', torqueLeft);
+        this.applyJointTorque('rightHip', torqueRight);
+    }
+
+    applyJointTorque(jointName, torqueValue) {
+        let leg = (jointName === 'leftHip') ? this.leftLeg : this.rightLeg;
+        let legPos = leg.position;
+        let offsetY = 20;
+        Matter.Body.applyForce(leg, {x: legPos.x, y: legPos.y + offsetY}, {x: torqueValue, y: 0});
+        Matter.Body.applyForce(leg, {x: legPos.x, y: legPos.y - offsetY}, {x: -torqueValue, y: 0});
+    }
+
+    isTerminated() {
+        if (this.torso.position.y > canvasHeight - 30) return true;
+        if (Math.abs(this.torso.angle) > Math.PI/2) return true;
+        return false;
+    }
+}
+
+// ============================================================
+// p5.js Setup and Draw
+// ============================================================
+
+function setup() {
+    createCanvas(canvasWidth, canvasHeight);
+    setupPhysics();
+    setupGUI();
+    infoDiv = select("#info");
+    initPolicyModel();
+    resetAgents();
+}
+
+function draw() {
+    background(220);
+
+    Matter.Engine.update(engine);
+
+    // Display ground
+    fill(100);
+    drawBody(ground);
+
+    // Display objects
+    fill(200,100,100);
+    for (let obj of objects) {
+        drawBody(obj);
+    }
+
+    // If training is in progress, step through the environment
+    if (trainingInProgress) {
+        stepEnvironment();
+    }
+
+    // Render agents
+    for (let agent of agents) {
+        agent.display();
+    }
+
+    // Display info
+    infoDiv.html(`
+        Epoch: ${currentEpoch}/${envParams.epochs}<br>
+        Episode: ${currentEpisode}/${envParams.episodesPerEpoch}<br>
+        Step: ${currentStep}/${envParams.stepsPerEpisode}<br>
+        Last Episode Return: ${episodeReturns.length>0 ? episodeReturns[episodeReturns.length-1].toFixed(2) : 'N/A'}
+    `);
+
+    // Draw learning progress chart (episode returns)
+    drawPerformanceChart();
+}
+
+// ============================================================
+// Environment and Agents Management
+// ============================================================
+
+function setupPhysics() {
+    engine = Matter.Engine.create();
+    world = engine.world;
+    world.gravity.y = envParams.gravity;
+
+    let groundOptions = { isStatic: true };
+    ground = Matter.Bodies.rectangle(canvasWidth/2, canvasHeight - 50, canvasWidth, 100, groundOptions);
+    Matter.World.add(world, ground);
+}
+
+function resetAgents() {
+    // Remove old agents
+    for (let a of agents) {
+        Matter.World.remove(world, a.torso);
+        Matter.World.remove(world, a.leftLeg);
+        Matter.World.remove(world, a.rightLeg);
+        Matter.World.remove(world, a.leftHip);
+        Matter.World.remove(world, a.rightHip);
+    }
+    agents = [];
+
+    // Create new agents
+    for (let i=0; i<numAgents; i++){
+        let x = width/2 + (i - numAgents/2)*100;
+        let y = height/2 - 100;
+        agents.push(new StickFigure(x, y, world));
+    }
+}
+
+function resetEnvironment() {
+    Matter.World.clear(world, false);
+    setupPhysics();
+    objects = [];
+    resetAgents();
+    currentStep = 0;
+    episodeReturn = 0;
+}
+
+// ============================================================
+// RL Setup and Policy
+// ============================================================
+
+function initPolicyModel() {
+    policyModel = tf.sequential();
+    policyModel.add(tf.layers.dense({units:32, inputShape:[7], activation:'relu'}));
+    policyModel.add(tf.layers.dense({units:32, activation:'relu'}));
+    // mean action output
+    policyModel.add(tf.layers.dense({units:2, activation:'linear'}));
+
+    optimizer = tf.train.adam(envParams.learningRate);
+}
+
+// Sample an action from a Gaussian policy with fixed std
+function getAction(state) {
+    let stateTensor = tf.tensor2d([state]);
+    let meanAction = policyModel.predict(stateTensor);
+    let mean = meanAction.arraySync()[0];
+    // Add Gaussian noise
+    let action = [
+        mean[0] + randomGaussian(0, actionStd),
+        mean[1] + randomGaussian(0, actionStd)
+    ];
+    meanAction.dispose();
+    stateTensor.dispose();
+    return action;
+}
+
+// ============================================================
+// Training Procedure
+// ============================================================
+
+async function startTraining() {
+    if (trainingInProgress) return;
+    trainingInProgress = true;
+    currentEpoch = 0;
+    currentEpisode = 0;
+    currentStep = 0;
+    episodeReturns = [];
+    trajectories = [];
+    resetEnvironment();
+}
+
+// Called each frame while training
+function stepEnvironment() {
+    if (currentEpoch >= envParams.epochs) {
+        // Training done
+        trainingInProgress = false;
+        return;
+    }
+
+    if (currentEpisode >= envParams.episodesPerEpoch) {
+        // Train policy at the end of the epoch
+        trainPolicy().then(() => {
+            currentEpoch++;
+            currentEpisode = 0;
+            resetEnvironment();
+        });
+        return;
+    }
+
+    if (currentStep >= envParams.stepsPerEpisode) {
+        // Episode done
+        endEpisode();
+        return;
+    }
+
+    // Step all agents
+    for (let agent of agents) {
+        if (!agent.isAlive) continue;
+
+        let state = agent.getState();
+        let action = getAction(state);
+        agent.applyAction(action);
+
+        // Compute reward
+        let reward = agent.torso.velocity.x * 0.1; // reward forward movement
+        if (agent.isTerminated()) {
+            agent.isAlive = false;
+            reward -= 1.0; // penalty for falling
+        }
+
+        trajectories.push({state, action, reward});
+        episodeReturn += reward;
+    }
+
+    currentStep++;
+}
+
+function endEpisode() {
+    episodeReturns.push(episodeReturn);
+    episodeReturn = 0;
+    currentEpisode++;
+    currentStep = 0;
+
+    // Reset environment for next episode
+    resetEnvironment();
+}
+
+async function trainPolicy() {
+    // Policy gradient update using REINFORCE
+    if (trajectories.length === 0) return;
+
+    // Extract arrays
+    const allStates = trajectories.map(t => t.state);
+    const allActions = trajectories.map(t => t.action);
+    const allRewards = trajectories.map(t => t.reward);
+
+    // Compute returns
+    const returns = [];
+    let G = 0;
+    for (let i = allRewards.length-1; i >= 0; i--) {
+        G = allRewards[i] + G;
+        returns.unshift(G);
+    }
+
+    // Normalize returns
+    let meanReturn = returns.reduce((a,b)=>a+b,0)/returns.length;
+    let stdReturn = Math.sqrt(returns.map(r=>(r-meanReturn)**2).reduce((a,b)=>a+b,0)/returns.length);
+    let normReturns = returns.map(r=>(r-meanReturn)/(stdReturn+1e-8));
+
+    const stateTensor = tf.tensor2d(allStates);
+    const actionTensor = tf.tensor2d(allActions);
+    const returnsTensor = tf.tensor1d(normReturns);
+
+    // We'll treat actions as sampled from pi(a|s) = N(mu(s), sigma^2 I)
+    // log-prob(a|s) = -((a - mu)^2/(2*sigma^2)) - log(sigma*sqrt(2*pi))
+    // sigma is fixed = actionStd
+    const sigmaVal = actionStd;
+    const logSigmaTerm = Math.log(sigmaVal * twoPi);
+
+    await optimizer.minimize(() => {
+        const mean = policyModel.apply(stateTensor); // shape [N,2]
+
+        const diff = tf.sub(actionTensor, mean);
+        const diffSq = tf.sum(tf.square(diff), 1); // shape [N]
+        // logProb = - (diffSq/(2*sigma^2)) - logSigmaTerm
+        // sigma^2 = sigmaVal^2
+        const invTwoSigmaSq = -1/(2*sigmaVal*sigmaVal);
+        const logProb = tf.add(tf.mul(diffSq, invTwoSigmaSq), tf.scalar(-logSigmaTerm));
+
+        // weighted log-prob
+        const weightedLogProb = tf.mul(logProb, returnsTensor);
+        // We want to maximize sum(weightedLogProb), so minimize negative
+        const loss = tf.neg(tf.mean(weightedLogProb));
+
+        return loss;
+    });
+
+    stateTensor.dispose();
+    actionTensor.dispose();
+    returnsTensor.dispose();
+
+    // Clear trajectories
+    trajectories = [];
+}
+
+// ============================================================
+// Visualization
+// ============================================================
+
+function drawPerformanceChart() {
+    if (episodeReturns.length < 2) return;
+    push();
+    translate(10, height-10);
+    stroke(0);
+    line(0,0,200,0); // x axis
+    line(0,0,0,-100); // y axis
+
+    stroke(255,0,0);
+    noFill();
+    beginShape();
+    for (let i=0; i<episodeReturns.length; i++) {
+        let x = map(i,0,episodeReturns.length-1,0,200);
+        let y = map(episodeReturns[i], -10,10,100,0);
+        vertex(x, -y);
+    }
+    endShape();
+    pop();
+}
+
+// ============================================================
+// GUI Setup with dat.GUI
+// ============================================================
+
+function setupGUI() {
+    gui = new dat.GUI({autoPlace: false});
+    document.getElementById('gui-container').appendChild(gui.domElement);
+
+    let envFolder = gui.addFolder('Environment');
+    envFolder.add(envParams, 'gravity', 0.0, 5.0).onFinishChange(() => world.gravity.y = envParams.gravity);
+    envFolder.open();
+
+    let rlFolder = gui.addFolder('RL');
+    rlFolder.add(envParams, 'learningRate', 0.0001, 0.01, 0.0001).onFinishChange(v => optimizer = tf.train.adam(v));
+    rlFolder.add(envParams, 'epochs', 1, 100, 1);
+    rlFolder.add(envParams, 'episodesPerEpoch', 1, 100, 1);
+    rlFolder.add(envParams, 'stepsPerEpisode', 100, 2000, 100);
+    rlFolder.add(envParams, 'resetSimulation').name('Reset');
+    rlFolder.add(envParams, 'startTraining').name('Start Training');
+    rlFolder.open();
+}
+
+// ============================================================
+// Resize Handler
+// ============================================================
+
+function windowResized() {
+    canvasWidth = window.innerWidth;
+    canvasHeight = window.innerHeight;
+    resizeCanvas(canvasWidth, canvasHeight);
+    resetEnvironment();
+}
+
+</script>
+</body>
+</html>

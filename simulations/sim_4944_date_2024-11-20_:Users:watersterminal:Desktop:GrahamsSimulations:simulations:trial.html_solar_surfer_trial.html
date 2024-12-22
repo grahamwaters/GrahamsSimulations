@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic Solar System Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #speedControl {
+            position: fixed;
+            left: 10px;
+            bottom: 10px;
+            width: 200px;
+            z-index: 1000;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="solarSystem"></canvas>
+    <input type="range" id="speedControl" min="0.1" max="10" step="0.1" value="1" title="Adjust simulation speed">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Initialize the scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting setup
+        const light = new THREE.PointLight(0xffffff, 1.5, 1000);
+        light.position.set(0, 0, 0);
+        scene.add(light);
+
+        // Array to hold celestial bodies
+        const celestialBodies = [];
+
+        // Function to add celestial bodies to the scene
+        function addBody(x, y, z, radius, color, velocity) {
+            const geometry = new THREE.SphereGeometry(radius, 32, 32);
+            const material = new THREE.MeshLambertMaterial({ color: color });
+            const body = new THREE.Mesh(geometry, material);
+            body.position.set(x, y, z);
+            body.velocity = new THREE.Vector3(velocity.x, velocity.y, velocity.z);
+            body.mass = radius * 1000;  // Simplified mass calculation
+            scene.add(body);
+            celestialBodies.push(body);
+        }
+
+        // Create solar system bodies
+        addBody(0, 0, 0, 5, 0xffff00, {x: 0, y: 0, z: 0}); // Sun
+        for (let i = 1; i <= 5; i++) {
+            addBody(i * 10, 0, 0, 1, 0xffdd00, {x: 0, y: i * 0.01, z: 0}); // Planets
+        }
+
+        // Function to update the positions of celestial bodies
+        function updatePositions() {
+            celestialBodies.forEach(body => {
+                celestialBodies.forEach(other => {
+                    if (body !== other) {
+                        const dx = other.position.x - body.position.x;
+                        const dy = other.position.y - body.position.y;
+                        const dz = other.position.z - body.position.z;
+                        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                        const forceMagnitude = 6.67430e-11 * (body.mass * other.mass) / (distance * distance);
+                        const force = new THREE.Vector3(dx, dy, dz).normalize().multiplyScalar(forceMagnitude);
+                        body.velocity.add(force.divideScalar(body.mass));
+                    }
+                });
+                body.position.add(body.velocity);
+            });
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePositions();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Solar System Simulation with Collisions</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<canvas id="solarSystem"></canvas>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const G = 0.0001; // Adjusted gravitational constant for the simulation scale
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+        }
+
+        update(planets) {
+            planets.forEach(planet => {
+                if (planet !== this) {
+                    const dx = planet.x - this.x;
+                    const dy = planet.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < this.radius + planet.radius) {
+                        this.collide(planet);
+                    } else {
+                        const force = G * (this.mass * planet.mass) / (dist * dist);
+                        const accel = force / this.mass;
+                        this.velocity.x += (dx / dist) * accel;
+                        this.velocity.y += (dy / dist) * accel;
+                    }
+                }
+            });
+
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+        }
+
+        collide(planet) {
+            // Simple collision logic: merge into larger planet
+            if (this.mass >= planet.mass) {
+                this.mass += planet.mass;
+                this.radius = Math.sqrt(this.radius * this.radius + planet.radius * planet.radius);
+                const totalMomentumX = this.mass * this.velocity.x + planet.mass * planet.velocity.x;
+                const totalMomentumY = this.mass * this.velocity.y + planet.mass * planet.velocity.y;
+                this.velocity.x = totalMomentumX / this.mass;
+                this.velocity.y = totalMomentumY / this.mass;
+                planet.mass = 0; // Mark planet for removal
+            }
+        }
+    }
+
+    const sun = new CelestialBody(canvas.width / 2, canvas.height / 2, 30, 100000, 'yellow', {x: 0, y: 0});
+    const planets = [sun];
+
+    function randomColor() {
+        return `hsl(${Math.random() * 360}, 100%, 50%)`;
+    }
+
+    function createPlanets(numPlanets) {
+        for (let i = 0; i < numPlanets; i++) {
+            const radius = Math.random() * (15 - 5) + 5;
+            const distance = Math.random() * (canvas.width / 4 - 50) + 50;
+            const angle = Math.random() * Math.PI * 2;
+            const x = sun.x + distance * Math.cos(angle);
+            const y = sun.y + distance * Math.sin(angle);
+            const mass = Math.random() * (50 - 10) + 10;
+            const color = randomColor();
+            const orbitalVelocity = Math.sqrt(G * sun.mass / distance);
+            const velocity = {
+                x: Math.sin(angle) * -orbitalVelocity,
+                y: Math.cos(angle) * orbitalVelocity
+            };
+
+            planets.push(new CelestialBody(x, y, radius, mass, color, velocity));
+        }
+    }
+
+    function removeDestroyedPlanets() {
+        for (let i = planets.length - 1; i >= 0; i--) {
+            if (planets[i].mass === 0) {
+                planets.splice(i, 1);
+            }
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        removeDestroyedPlanets(); // Clean up planets marked for removal
+        planets.forEach(planet => {
+            planet.draw();
+            planet.update(planets);
+        });
+    }
+
+    createPlanets(5);
+    animate();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        sun.x = canvas.width / 2;
+        sun.y = canvas.height / 2;
+    });
+</script>
+</body>
+</html>
