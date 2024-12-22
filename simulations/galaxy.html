@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="galaxy"></canvas>
+
+    <script>
+        const canvas = document.getElementById('galaxy');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas to full window size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            centerX = canvas.width / 2;
+            centerY = canvas.height / 2;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        const stars = [];
+        const numStars = 1000;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        // Utility function to generate a random number between min and max
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // Create stars with spiral distribution
+        for (let i = 0; i < numStars; i++) {
+            const theta = random(0, 4 * Math.PI); // Angle
+            const radius = Math.sqrt(random(0, 1)) * 300; // Distance from center
+            const x = radius * Math.cos(theta);
+            const y = radius * Math.sin(theta);
+
+            // Add some thickness to the galaxy
+            const offsetX = random(-radius * 0.1, radius * 0.1);
+            const offsetY = random(-radius * 0.1, radius * 0.1);
+
+            stars.push({
+                x: x + offsetX,
+                y: y + offsetY,
+                size: random(0.5, 2),
+                color: `rgba(${Math.floor(random(200, 255))}, ${Math.floor(random(200, 255))}, ${Math.floor(random(200, 255))}, ${random(0.5, 1)})`,
+                speed: random(0.0005, 0.0015) * (radius / 300) // Speed based on distance
+            });
+        }
+
+        // Animation variables
+        let angle = 0;
+
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(angle);
+
+            for (let star of stars) {
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fillStyle = star.color;
+                ctx.fill();
+            }
+
+            ctx.restore();
+
+            angle += 0.001;
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

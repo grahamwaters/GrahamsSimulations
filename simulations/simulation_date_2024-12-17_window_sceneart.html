@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screensaver with Morphing Squares</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #container {
+            display: flex;
+            flex-wrap: wrap;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .square {
+            width: 2%; /* Adjust the size of squares here */
+            height: 2%;
+            transition: transform 2s, background-color 2s;
+            backface-visibility: hidden;
+            transform-style: preserve-3d;
+        }
+
+        .flip {
+            transform: rotateY(180deg);
+        }
+
+        .color-shift {
+            animation: colorShift 10s infinite alternate;
+        }
+
+        @keyframes colorShift {
+            0% { background-color: #6b5b95; }
+            25% { background-color: #feb236; }
+            50% { background-color: #d64161; }
+            75% { background-color: #ff7b25; }
+            100% { background-color: #a2b9bc; }
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const container = document.getElementById('container');
+            const numSquares = (100 / 2) * (100 / 2); // This creates enough squares to fill the screen
+
+            for (let i = 0; i < numSquares; i++) {
+                const square = document.createElement('div');
+                square.classList.add('square');
+                container.appendChild(square);
+            }
+
+            setInterval(() => {
+                const squares = document.querySelectorAll('.square');
+                squares.forEach(square => {
+                    if (Math.random() > 0.5) {
+                        square.classList.toggle('flip');
+                    }
+                    if (Math.random() > 0.8) {
+                        square.classList.add('color-shift');
+                    }
+                });
+            }, 2000);
+        });
+    </script>
+</body>
+</html>

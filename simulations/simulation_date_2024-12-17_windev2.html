@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WIN Time Rotation</title>
+    <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.1/lib/anime.min.js"></script>
+    <style>
+        /* Basic styling */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            text-align: center;
+            color: #333;
+        }
+
+        h1 {
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 1s linear;
+        }
+
+        .station-container {
+            display: flex;
+            justify-content: space-around;
+            flex-grow: 1;
+            flex-wrap: wrap;
+        }
+
+        .station {
+            flex: 1 1 20%;
+            min-width: 180px;
+            background-color: #f8f8f8;
+            border: 2px solid #ccc;
+            border-radius: 10px;
+            margin: 10px;
+            padding: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .station h3 {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .student-rectangle {
+            width: 100%;
+            height: 30px;
+            border-radius: 8px;
+            margin-bottom: 5px;
+            box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 10px;
+            cursor: pointer;
+        }
+
+        .small-timer {
+            font-size: 12px;
+            color: #444;
+        }
+
+        .small-group-box, .rti-log {
+            position: fixed;
+            bottom: 0;
+            width: 45%;
+            min-height: 100px;
+            background-color: #ffefef;
+            border: 2px solid #cc8888;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .small-group-box {
+            right: 10px;
+        }
+
+        .rti-log {
+            left: 10px;
+            font-size: 0.9em;
+            height: 120px; /* Adjusted height */
+            overflow-y: scroll; /* Scrollable log */
+        }
+
+        #skipButton, #downloadButton {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            position: fixed;
+            bottom: 20px;
+        }
+
+        #skipButton {
+            left: 20px;
+        }
+
+        #downloadButton {
+            right: 20px;
+            background-color: #007BFF;
+        }
+
+        #timer {
+            margin: 5px auto;
+            font-size: 18px;
+            color: #444;
+        }
+
+        .tooltip {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            z-index: 10;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 5px;
+            display: none;
+            width: 200px;
+        }
+
+        .tooltip textarea {
+            width: 100%;
+            height: 50px;
+        }
+
+        .tooltip button {
+            width: 49%;
+            padding: 5px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>WIN Time Rotation</h1>
+    <div class="progress-bar"><div class="progress-bar-fill"></div></div>
+    <div class="station-container" id="stations"></div>
+    <div class="small-group-box" id="smallGroup"><strong>RTI Group</strong></div>
+    <div class="rti-log" id="rtiLog"><strong>RTI Log</strong></div>
+    <button id="skipButton" onclick="skipRotation()">Skip to Next Rotation</button>
+    <button id="downloadButton" onclick="downloadLog()">Download Log</button>
+    <div id="timer">15:00</div>
+
+    <script>
+        const students = ['Malik', 'Ephraim', 'Mike', 'Tabius', 'Kasen', 'Ysabeau', 'Jaycen', 'Carter', 'Stephen', 'Bentley H', 'Elizabeth', 'Hayden', 'Colton', 'Bentley M', 'Avery', 'Molly', 'Eden', 'Halina', 'Marhamah', 'Princeton', 'Rejoice', 'Adrianna'];
+        const activities = ['Tower of Power', 'Amira', 'BrainPop Jr.', 'Math Rotations', 'Typing Club'];
+        const colors = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#fff176', '#90a4ae'];
+        const studentColors = {};
+        students.forEach((student, index) => {
+            studentColors[student] = colors[index % colors.length];
+        });
+        let time = 900; // 15 minutes in seconds
+        let rtiTimers = {}; // Track time for each student in RTI
+        let inRTI = []; // Track students in RTI
+        let stationLog = {}; // Track station assignments
+
+        function setupStations() {
+            const container = document.getElementById('stations');
+            container.innerHTML = ''; // Clear existing stations
+            activities.forEach(activity => {
+                const station = document.createElement('div');
+                station.className = 'station';
+                station.innerHTML = `<h3 contenteditable="true">${activity}</h3>`; // Editable activity header
+                container.appendChild(station);
+            });
+            assignStudents();
+        }
+
+        function assignStudents() {
+            const shuffledStudents = students.filter(s => !inRTI.includes(s)).sort(() => Math.random() - 0.5);
+            const stationDivs = document.querySelectorAll('.station');
+            shuffledStudents.forEach((student, index) => {
+                const rectangle = createStudentTile(student);
+                const station = stationDivs[index % stationDivs.length];
+                station.appendChild(rectangle);
+                logAssignment(station.querySelector('h3').textContent, student);
+            });
+        }
+
+        function createStudentTile(student) {
+            const rectangle = document.createElement('div');
+            rectangle.className = 'student-rectangle';
+            rectangle.textContent = student;
+            rectangle.style.backgroundColor = studentColors[student];
+            const timer = document.createElement('span');
+            timer.className = 'small-timer';
+            const tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            tooltip.innerHTML = '<textarea></textarea><button onclick="saveNote(this)">Save</button><button onclick="cancelNote(this)">Cancel</button>';
+            rectangle.appendChild(timer);
+            rectangle.appendChild(tooltip);
+            rectangle.ondblclick = () => toggleRTI(student, rectangle, timer, tooltip);
+            return rectangle;
+        }
+
+        function toggleRTI(student, rectangle, timer, tooltip) {
+            const rtiBox = document.getElementById('smallGroup');
+            const rtiLog = document.getElementById('rtiLog');
+
+            if (rtiBox.contains(rectangle)) {
+                const station = findStationWithFewest();
+                station.appendChild(rectangle);
+                clearInterval(rtiTimers[student]);
+                rtiLog.innerHTML += `<div>${student} - Released from RTI - ${timer.textContent} - ${new Date().toLocaleDateString()}</div>`;
+                timer.textContent = '';
+                tooltip.style.display = 'none';
+                delete rtiTimers[student];
+                inRTI = inRTI.filter(s => s !== student);
+                logAssignment(station.querySelector('h3').textContent, student);
+            } else {
+                rtiBox.appendChild(rectangle);
+                rtiTimers[student] = startTimer(timer);
+                rtiLog.innerHTML += `<div>${student} - Moved to RTI - ${new Date().toLocaleDateString()}</div>`;
+                tooltip.style.display = 'block';
+                if (!inRTI.includes(student)) inRTI.push(student);
+            }
+        }
+
+        function startTimer(timerElement) {
+            let seconds = 0;
+            return setInterval(() => {
+                seconds++;
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                timerElement.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+            }, 1000);
+        }
+
+        function saveNote(button) {
+            const textarea = button.parentNode.querySelector('textarea');
+            const student = button.parentNode.parentNode.textContent.trim();
+            const log = document.getElementById('rtiLog');
+            log.innerHTML += `<div>${student} - Note: ${textarea.value} - ${new Date().toLocaleDateString()}</div>`;
+            textarea.value = '';
+            button.parentNode.style.display = 'none';
+        }
+
+        function cancelNote(button) {
+            const textarea = button.parentNode.querySelector('textarea');
+            textarea.value = '';
+            button.parentNode.style.display = 'none';
+        }
+
+        function skipRotation() {
+            time = 0; // Skip to next rotation
+        }
+
+        function updateTimer() {
+            const minutes = Math.floor(time / 60);
+            const seconds = time % 60;
+            document.getElementById('timer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+            document.querySelector('.progress-bar-fill').style.width = `${(time / 900) * 100}%`;
+
+            if (time-- <= 0) {
+                time = 900;
+                setupStations(); // Refresh stations and assignments
+            }
+        }
+
+        setInterval(updateTimer, 1000); // Start timer for rotations
+    </script>
+</body>
+</html>
