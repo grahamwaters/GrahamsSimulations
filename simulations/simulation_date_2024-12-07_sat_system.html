@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>PPO RL Satellite in Binary Star System</title>
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            color: #fff;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border: 1px solid #444;
+            z-index: 10;
+            width: 300px;
+            font-family: 'Lucida Console', Courier, monospace;
+        }
+
+        #hud h1 {
+            font-size: 16px;
+            margin:0 0 5px;
+            color: #0ff;
+        }
+
+        #hud .info-line {
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        #hud .info-line span {
+            color: #0f0;
+        }
+    </style>
+</head>
+<body>
+<div id="hud">
+    <h1>Satellite HUD (PPO RL)</h1>
+    <div class="info-line">Episode: <span id="episode">0</span></div>
+    <div class="info-line">Step: <span id="step">0</span></div>
+    <div class="info-line">Reward (Ep): <span id="reward">0</span></div>
+    <div class="info-line">Sat Pos: <span id="satpos">x=0,y=0</span></div>
+    <div class="info-line">Sat Vel: <span id="satvel">vx=0,vy=0</span></div>
+</div>
+
+<!-- THREE.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Cannon.js -->
+<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+<!-- TensorFlow.js -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+
+<script>
+////////////////////////////////////////////////////////////////////////////////
+// This code is a complex proof-of-concept. PPO implementation is simplified.
+// Actual PPO is more complex. We do a single update per episode, no multiple epochs, etc.
+////////////////////////////////////////////////////////////////////////////////
+
+// DOM elements
+const episodeElem = document.getElementById('episode');
+const stepElem = document.getElementById('step');
+const rewardElem = document.getElementById('reward');
+const satPosElem = document.getElementById('satpos');
+const satVelElem = document.getElementById('satvel');
+
+let scene, camera, renderer, world;
+let star1, star2, planets = [], satellite;
+let episode = 0;
+let stepCount = 0;
+let totalReward = 0;
+
+// RL configuration
+const ACTIONS = ['none','up','down','left','right'];
+const MAX_STEPS = 1500; // steps per episode
+const MAX_EPISODES = 500;
+
+// PPO parameters
+const GAMMA = 0.99;
+const LAMBDA = 0.95; // for GAE
+const CLIP_RANGE = 0.2;
+const LR = 0.0005;
+
+// We'll store trajectories and do PPO update after each episode
+let trajectory = {
+    states: [],
+    actions: [],
+    rewards: [],
+    values: [],
+    logProbs: []
+};
+
+// PPO Networks: Policy (pi) and Value (v)
+class PolicyNetwork {
+    constructor(actionSize, stateSize) {
+        this.actionSize = actionSize;
+        this.stateSize = stateSize;
+        this.buildModel();
+    }
+
+    buildModel() {
+        // Policy network
+        this.policyModel = tf.sequential();
+        this.policyModel.add(tf.layers.dense({units:64, activation:'relu', inputShape:[this.stateSize]}));
+        this.policyModel.add(tf.layers.dense({units:64, activation:'relu'}));
+        this.policyModel.add(tf.layers.dense({units:this.actionSize, activation:'softmax'}));
+
+        // Value network
+        this.valueModel = tf.sequential();
+        this.valueModel.add(tf.layers.dense({units:64, activation:'relu', inputShape:[this.stateSize]}));
+        this.valueModel.add(tf.layers.dense({units:64, activation:'relu'}));
+        this.valueModel.add(tf.layers.dense({units:1, activation:'linear'}));
+
+        this.policyOptimizer = tf.train.adam(LR);
+        this.valueOptimizer = tf.train.adam(LR);
+    }
+
+    predictPolicy(state) {
+        return tf.tidy(() => {
+            const s = tf.tensor2d([state]);
+            const logits = this.policyModel.predict(s);
+            const probs = logits.dataSync();
+            s.dispose();
+            logits.dispose();
+            return probs;
+        });
+    }
+
+    predictValue(state) {
+        return tf.tidy(() => {
+            const s = tf.tensor2d([state]);
+            const val = this.valueModel.predict(s);
+            const v = val.dataSync()[0];
+            s.dispose();
+            val.dispose();
+            return v;
+        });
+    }
+
+    // For PPO training, we need to recompute actions' log probs and values in batch
+    getValues(states) {
+        return tf.tidy(() => {
+            const s = tf.tensor2d(states);
+            const vals = this.valueModel.predict(s);
+            return vals;
+        });
+    }
+
+    getLogits(states) {
+        return tf.tidy(() => {
+            const s = tf.tensor2d(states);
+            const logits = this.policyModel.predict(s);
+            return logits;
+        });
+    }
+
+    async trainPPO(states, actions, oldLogProbs, returns, advantages) {
+        // states: NxS, actions: Nx1, oldLogProbs: Nx1, returns: Nx1, advantages: Nx1
+        const actionTensor = tf.tensor1d(actions, 'int32');
+        const oldLogProbTensor = tf.tensor1d(oldLogProbs, 'float32');
+        const returnTensor = tf.tensor2d(returns, [returns.length, 1], 'float32');
+        const advantageTensor = tf.tensor2d(advantages, [advantages.length,1],'float32');
+        const stateTensor = tf.tensor2d(states);
+
+        // Update policy
+        await this.policyOptimizer.minimize(() => {
+            const logits = this.policyModel.apply(stateTensor);
+            // Extract the log probs of chosen actions
+            const logProbs = tf.log(tf.gatherND(logits, actions.map((a,i)=>[i,a]),0))
+                              .sub(tf.log(tf.sum(logits,1,true)));
+            const ratio = tf.exp(logProbs.sub(oldLogProbTensor));
+            const clippedRatio = tf.clipByValue(ratio, 1-CLIP_RANGE, 1+CLIP_RANGE);
+            const obj = tf.minimum(ratio.mul(advantageTensor), clippedRatio.mul(advantageTensor));
+            const policyLoss = tf.neg(tf.mean(obj));
+            return policyLoss;
+        });
+
+        // Update value
+        await this.valueOptimizer.minimize(() => {
+            const values = this.valueModel.apply(stateTensor);
+            const valueLoss = tf.mean(tf.square(returnTensor.sub(values)));
+            return valueLoss;
+        });
+
+        stateTensor.dispose();
+        actionTensor.dispose();
+        oldLogProbTensor.dispose();
+        returnTensor.dispose();
+        advantageTensor.dispose();
+    }
+
+}
+let ppo; // global policy instance
+
+////////////////////////////////////////////////////////////////////////////////
+// Physics and Scene Setup
+////////////////////////////////////////////////////////////////////////////////
+const G = 6.67430e-11;
+const SCALE = 1e-2;
+const TIME_STEP = 1/60;
+
+// We'll define a binary star system and some planets.
+// For simplicity, choose arbitrary masses, positions, velocities to get elliptical orbits.
+function initThree() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1e7);
+    camera.position.set(0,0,5000);
+
+    renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const ambient = new THREE.AmbientLight(0xffffff,0.4);
+    scene.add(ambient);
+    const pointLight = new THREE.PointLight(0xffffff,1,0);
+    scene.add(pointLight);
+
+    // Background stars
+    const starGeom = new THREE.BufferGeometry();
+    const starCount = 3000;
+    const positions = new Float32Array(starCount*3);
+    for (let i=0; i<starCount*3; i++) {
+        positions[i] = (Math.random()*2-1)*8000;
+    }
+    starGeom.setAttribute('position', new THREE.BufferAttribute(positions,3));
+    const starMat = new THREE.PointsMaterial({color:0xffffff, size:2});
+    const starField = new THREE.Points(starGeom, starMat);
+    scene.add(starField);
+}
+
+function initCannon() {
+    world = new CANNON.World();
+    world.gravity.set(0,0,0); // We'll apply gravitational forces manually
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.solver.iterations = 10;
+}
+
+function createBody(mesh, mass, shape) {
+    const body = new CANNON.Body({mass:mass, shape:shape});
+    world.addBody(body);
+    return {mesh, body};
+}
+
+function createSphereBody(radius, color, mass, pos, vel) {
+    const geom = new THREE.SphereGeometry(radius,32,32);
+    const mat = new THREE.MeshBasicMaterial({color:color});
+    const mesh = new THREE.Mesh(geom,mat);
+    mesh.position.copy(pos);
+    scene.add(mesh);
+    const body = new CANNON.Body({
+        mass: mass,
+        position: new CANNON.Vec3(pos.x,pos.y,0),
+        velocity: new CANNON.Vec3(vel.x,vel.y,0),
+        shape: new CANNON.Sphere(radius)
+    });
+    world.addBody(body);
+    return {mesh,body};
+}
+
+function createSatellite(pos, vel) {
+    const geom = new THREE.ConeGeometry(5,15,32);
+    const mat = new THREE.MeshStandardMaterial({color:0xffffff});
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.rotation.x = Math.PI/2;
+    mesh.position.copy(pos);
+    scene.add(mesh);
+
+    const body = new CANNON.Body({
+        mass:10,
+        position:new CANNON.Vec3(pos.x,pos.y,0),
+        velocity:new CANNON.Vec3(vel.x,vel.y,0),
+        shape:new CANNON.Cylinder(5,5,15,16)
+    });
+    world.addBody(body);
+
+    return {mesh, body};
+}
+
+function initSystem() {
+    // Binary star system:
+    // Let's say two equal mass stars orbiting each other.
+    // Positions: +/- 200 units apart, velocities set for elliptical orbit.
+    // Mass chosen large for strong gravity.
+    const starMass = 5e13;
+    const starDist = 200;
+    const vx = 50; // velocity to produce elliptical orbits
+
+    star1 = createSphereBody(20,0xffa500,starMass, new THREE.Vector3(-starDist,0,0),new THREE.Vector3(0,vx,0));
+    star2 = createSphereBody(20,0x1e90ff,starMass, new THREE.Vector3(starDist,0,0),new THREE.Vector3(0,-vx,0));
+
+    // Add a few planets orbiting around the binary system barycenter
+    // We'll place them at different distances and slight velocity offsets for elliptical orbits
+    planets = [];
+    const planetMasses = [1e10, 5e9, 8e9];
+    const planetDistances = [500, 800, 1200];
+    const planetVelocities = [20, 15, 10];
+    for (let i=0; i<planetMasses.length; i++) {
+        const angle = Math.random()*Math.PI*2;
+        const dist = planetDistances[i];
+        const x = Math.cos(angle)*dist;
+        const y = Math.sin(angle)*dist;
+        // velocity perpendicular to radius for elliptical orbit
+        const vx = -y*(planetVelocities[i]/dist);
+        const vy = x*(planetVelocities[i]/dist);
+        const color = i===0 ? 0x00ff00 : i===1 ? 0xaaaa00 : 0xff00ff;
+        const p = createSphereBody(10,color,planetMasses[i], new THREE.Vector3(x,y,0), new THREE.Vector3(vx,vy,0));
+        planets.push(p);
+    }
+
+    // Satellite initial position and velocity
+    // Place it somewhere away from stars, with some initial velocity
+    const satPos = new THREE.Vector3(0,-1000,0);
+    const satVel = new THREE.Vector3(30,0,0);
+    satellite = createSatellite(satPos, satVel);
+}
+
+function applyGravitationalForces() {
+    const bodies = [star1.body, star2.body, ...planets.map(p=>p.body), satellite.body];
+    for (let b of bodies) {
+        b.force.set(0,0,0);
+    }
+
+    for (let i=0; i<bodies.length; i++) {
+        for (let j=i+1; j<bodies.length; j++) {
+            const b1 = bodies[i], b2 = bodies[j];
+            const dx = b2.position.x - b1.position.x;
+            const dy = b2.position.y - b1.position.y;
+            const r2 = dx*dx+dy*dy;
+            const r = Math.sqrt(r2);
+            if (r>1e-6) {
+                const f = G*(b1.mass*b2.mass)/r2;
+                const fx = f*(dx/r);
+                const fy = f*(dy/r);
+                b1.force.x += fx;
+                b1.force.y += fy;
+                b2.force.x -= fx;
+                b2.force.y -= fy;
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RL Helpers
+////////////////////////////////////////////////////////////////////////////////
+function sampleAction(probs) {
+    const rand = Math.random();
+    let cum = 0;
+    for (let i=0; i<probs.length; i++) {
+        cum += probs[i];
+        if (rand<cum) return i;
+    }
+    return probs.length-1;
+}
+
+function getState() {
+    // State: Satellite position, velocity,
+    // relative positions to stars, planets (limit to some number),
+    // total we might have a large state vector.
+    // Keep it simpler:
+    // [sat.x/1000, sat.y/1000, sat.vx/100, sat.vy/100,
+    //  relStar1x/1000, relStar1y/1000,
+    //  relStar2x/1000, relStar2y/1000,
+    //  For each planet: relx/1000, rely/1000 (take up to 3 planets)
+    const satP = satellite.body.position;
+    const satV = satellite.body.velocity;
+    const rel1 = star1.body.position.vsub(satP);
+    const rel2 = star2.body.position.vsub(satP);
+
+    let state = [
+        satP.x/1000, satP.y/1000,
+        satV.x/100, satV.y/100,
+        rel1.x/1000, rel1.y/1000,
+        rel2.x/1000, rel2.y/1000
+    ];
+
+    for (let i=0; i<3; i++) {
+        if (i<planets.length) {
+            const rp = planets[i].body.position.vsub(satP);
+            state.push(rp.x/1000, rp.y/1000);
+        } else {
+            state.push(0,0);
+        }
+    }
+
+    return state;
+}
+
+function getReward() {
+    // Reward:
+    // Negative if too close to a star or planet -> death
+    // Try to maintain stable orbit (like staying within a certain distance range)
+    // Small positive for staying alive each step
+    const satP = satellite.body.position;
+
+    // Check collisions:
+    const checkCollision = (b,radius=30) => {
+        const d = satP.vsub(b.position).norm();
+        if (d<radius) return true;
+        return false;
+    }
+
+    if (checkCollision(star1.body) || checkCollision(star2.body)) return -100;
+    for (let p of planets) {
+        if (checkCollision(p.body,30)) return -100;
+    }
+
+    // Distance penalty if too far away?
+    // Let's encourage staying within 2000 units of the system center (0,0)
+    const distCenter = satP.norm();
+    const distPenalty = -Math.abs(distCenter-1000)*0.001;
+
+    // Survive bonus
+    const survival = 0.1;
+
+    return survival + distPenalty;
+}
+
+function applyAction(action) {
+    // thrusters
+    const forceMagnitude = 500;
+    const f = new CANNON.Vec3(0,0,0);
+    switch(ACTIONS[action]) {
+        case 'up': f.y += forceMagnitude; break;
+        case 'down': f.y -= forceMagnitude; break;
+        case 'left': f.x -= forceMagnitude; break;
+        case 'right': f.x += forceMagnitude; break;
+    }
+    satellite.body.applyForce(f, satellite.body.position);
+}
+
+async function runEpisode() {
+    stepCount = 0;
+    totalReward = 0;
+    trajectory.states = [];
+    trajectory.actions = [];
+    trajectory.rewards = [];
+    trajectory.values = [];
+    trajectory.logProbs = [];
+
+    // reset system
+    resetSystem();
+
+    for (let i=0; i<MAX_STEPS; i++) {
+        stepCount = i;
+        const state = getState();
+        const value = ppo.predictValue(state);
+        const probs = ppo.predictPolicy(state);
+
+        // Compute logprob of chosen action:
+        const action = sampleAction(probs);
+        const logProb = Math.log(probs[action]+1e-8);
+
+        // Store
+        trajectory.states.push(state);
+        trajectory.actions.push(action);
+        trajectory.values.push(value);
+        trajectory.logProbs.push(logProb);
+
+        applyAction(action);
+
+        // Physics step
+        applyGravitationalForces();
+        world.step(TIME_STEP);
+
+        // Update visuals
+        updateObjects();
+        renderer.render(scene,camera);
+
+        const reward = getReward();
+        trajectory.rewards.push(reward);
+        totalReward += reward;
+
+        updateHUD();
+
+        if (reward<=-100) {
+            // Episode ends in collision
+            break;
+        }
+    }
+
+    // End of episode: PPO update
+    await ppoUpdate(trajectory);
+
+    episode++;
+}
+
+async function ppoUpdate(traj) {
+    // Compute advantages using GAE-lambda
+    const values = traj.values;
+    const rewards = traj.rewards;
+    const states = traj.states;
+    const actions = traj.actions;
+    const oldLogProbs = traj.logProbs;
+
+    // Get next value (bootstrap)
+    let lastValue = 0;
+    if (rewards.length===MAX_STEPS && rewards[rewards.length-1]>-100) {
+        const finalState = states[states.length-1];
+        lastValue = ppo.predictValue(finalState);
+    }
+
+    let advantages = new Array(rewards.length);
+    let returns = new Array(rewards.length);
+
+    let gae = 0;
+    for (let t=rewards.length-1; t>=0; t--) {
+        const delta = rewards[t] + GAMMA*(t===rewards.length-1?lastValue:values[t+1]) - values[t];
+        gae = delta + GAMMA*LAMBDA*gae;
+        advantages[t] = gae;
+    }
+
+    for (let t=0; t<rewards.length; t++) {
+        returns[t] = advantages[t] + values[t];
+    }
+
+    // Normalize advantages
+    const meanAdv = advantages.reduce((a,b)=>a+b,0)/advantages.length;
+    const varAdv = advantages.map(a=>(a-meanAdv)**2).reduce((a,b)=>a+b,0)/advantages.length;
+    const stdAdv = Math.sqrt(varAdv);
+    advantages = advantages.map(a=>(a-meanAdv)/(stdAdv+1e-8));
+
+    await ppo.trainPPO(states, actions, oldLogProbs, returns, advantages);
+}
+
+function resetSystem() {
+    // Clear world and scene
+    while(scene.children.length>0) {
+        scene.remove(scene.children[0]);
+    }
+    world.clearForces();
+    world.bodies.length=0;
+
+    initThree();
+    initCannon();
+    initSystem();
+}
+
+function updateObjects() {
+    star1.mesh.position.copy(star1.body.position);
+    star2.mesh.position.copy(star2.body.position);
+    for (let i=0; i<planets.length; i++) {
+        planets[i].mesh.position.copy(planets[i].body.position);
+    }
+    satellite.mesh.position.copy(satellite.body.position);
+    satellite.mesh.quaternion.copy(satellite.body.quaternion);
+}
+
+function updateHUD() {
+    episodeElem.textContent = episode;
+    stepElem.textContent = stepCount;
+    rewardElem.textContent = totalReward.toFixed(2);
+    const sp = satellite.body.position;
+    const sv = satellite.body.velocity;
+    satPosElem.textContent = `x=${sp.x.toFixed(1)},y=${sp.y.toFixed(1)}`;
+    satVelElem.textContent = `vx=${sv.x.toFixed(1)},vy=${sv.y.toFixed(1)}`;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Main
+////////////////////////////////////////////////////////////////////////////////
+(async () => {
+    // State Size:
+    // sat:4 + stars:4 + 3 planets*2=6 => total 14
+    const stateSize = 14;
+    const actionSize = ACTIONS.length;
+    ppo = new PolicyNetwork(actionSize, stateSize);
+
+    initThree();
+    initCannon();
+    initSystem();
+
+    for (let ep=0; ep<MAX_EPISODES; ep++) {
+        await runEpisode();
+        console.log(`Episode ${episode}, Total Reward: ${totalReward}`);
+    }
+
+    console.log("Training complete.");
+})();
+</script>
+</body>
+</html>

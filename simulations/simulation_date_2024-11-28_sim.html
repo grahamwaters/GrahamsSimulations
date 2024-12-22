@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System Orbital Mechanics Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="simulationCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const context = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const G = 6.67430e-11 * 1e-11; // Adjusted for visualization
+        let scale = 1; // Visual scale for simulation
+        let offsetX = 0, offsetY = 0;
+        let stars = [];
+        let celestialBodies = [];
+
+        class CelestialBody {
+            constructor(x, y, radius, mass, color, velocity, isStatic = false) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.mass = mass;
+                this.color = color;
+                this.velocity = velocity;
+                this.isStatic = isStatic;
+            }
+
+            draw() {
+                context.save();
+                context.translate(offsetX, offsetY);
+                context.scale(scale, scale);
+                context.beginPath();
+                context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                context.fillStyle = this.color;
+                context.fill();
+                context.restore();
+            }
+
+            update() {
+                if (!this.isStatic) {
+                    celestialBodies.forEach(body => {
+                        if (body !== this) {
+                            const dx = body.x - this.x;
+                            const dy = body.y - this.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            const forceDirectionX = dx / distance;
+                            const forceDirectionY = dy / distance;
+                            const force = G * (this.mass * body.mass) / (distance * distance);
+                            const accelerationX = forceDirectionX * force / this.mass;
+                            const accelerationY = forceDirectionY * force / this.mass;
+
+                            this.velocity.x += accelerationX;
+                            this.velocity.y += accelerationY;
+                        }
+                    });
+
+                    this.x += this.velocity.x;
+                    this.y += this.velocity.y;
+                }
+            }
+        }
+
+        function generateStars(count) {
+            for (let i = 0; i < count; i++) {
+                stars.push({
+                    x: Math.random() * canvas.width / scale,
+                    y: Math.random() * canvas.height / scale,
+                    size: Math.random() * 3
+                });
+            }
+        }
+
+        function drawStars() {
+            stars.forEach(star => {
+                context.save();
+                context.translate(offsetX, offsetY);
+                context.scale(scale, scale);
+                context.beginPath();
+                context.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                context.fillStyle = '#FFF';
+                context.fill();
+                context.restore();
+            });
+        }
+
+        function draw() {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            drawStars();
+            celestialBodies.forEach(body => {
+                body.draw();
+                body.update();
+            });
+        }
+
+        function animate() {
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        generateStars(200); // Background stars
+
+        // Define the solar system
+        const sun = new CelestialBody(canvas.width / 2, canvas.height / 2, 30, 1.989e30, '#FFFF00', {x: 0, y: 0}, true);
+        const mercury = new CelestialBody(canvas.width / 2 + 58, canvas.height / 2, 5, 3.3e23, '#BBBBBB', {x: 0, y: -47.4}, false);
+        const venus = new CelestialBody(canvas.width / 2 + 108, canvas.height / 2, 12, 4.87e24, '#E1C699', {x: 0, y: -35.0}, false);
+        const earth = new CelestialBody(canvas.width / 2 + 150, canvas.height / 2, 12, 5.972e24, '#0077FF', {x: 0, y: -29.8}, false);
+        const mars = new CelestialBody(canvas.width / 2 + 228, canvas.height / 2, 7, 6.39e23, '#FF0000', {x: 0, y: -24.1}, false);
+
+        celestialBodies.push(sun, mercury, venus, earth, mars);
+
+        animate();
+    </script>
+</body>
+</html>

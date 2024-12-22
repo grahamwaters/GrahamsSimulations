@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ulam Spiral Swarm Simulation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background-color: #f0f0f0;
+    }
+    canvas {
+      margin: 20px;
+      background: #ffffff;
+      border: 1px solid #ccc;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      margin-top: 10px;
+    }
+    .button {
+      padding: 10px 20px;
+      margin: 0 5px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .button:disabled {
+      background-color: #aaa;
+    }
+    .button:hover:not(:disabled) {
+      background-color: #0056b3;
+    }
+    .stats {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .stat {
+      margin: 10px;
+      padding: 10px;
+      background: #e9ecef;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ulam Spiral Swarm Simulation</h1>
+  <canvas id="ulamCanvas" width="600" height="600"></canvas>
+  <div class="controls">
+    <button class="button" id="startButton">Start Simulation</button>
+    <button class="button" id="resetButton" disabled>Reset</button>
+  </div>
+  <div class="stats" id="stats"></div>
+
+  <script>
+    const canvas = document.getElementById('ulamCanvas');
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const size = 20; // Size of each cell
+    const cols = Math.floor(width / size);
+    const rows = Math.floor(height / size);
+    const centerX = Math.floor(cols / 2);
+    const centerY = Math.floor(rows / 2);
+
+    const agentCount = 10;
+    const learningRate = 0.1;
+    const discountFactor = 0.9;
+    const epsilon = 0.2;
+    const simulationDelay = 100;
+    let agents = [];
+    let grid = Array.from({ length: rows }, () => Array(cols).fill(0));
+    let running = false;
+
+    function isPrime(n) {
+      if (n < 2) return false;
+      for (let i = 2; i <= Math.sqrt(n); i++) {
+        if (n % i === 0) return false;
+      }
+      return true;
+    }
+
+    function generateUlamSpiral() {
+      let x = centerX;
+      let y = centerY;
+      let dx = 0;
+      let dy = -1;
+      let num = 1;
+      let steps = 1;
+      let stepCounter = 0;
+      let turnCounter = 0;
+
+      while (true) {
+        if (x >= 0 && x < cols && y >= 0 && y < rows) {
+          grid[y][x] = isPrime(num) ? -1 : num;
+          ctx.fillStyle = isPrime(num) ? '#FFD700' : '#ffffff';
+          ctx.strokeStyle = '#ccc';
+          ctx.fillRect(x * size, y * size, size, size);
+          ctx.strokeRect(x * size, y * size, size, size);
+        }
+
+        x += dx;
+        y += dy;
+        num++;
+        stepCounter++;
+
+        if (stepCounter === steps) {
+          stepCounter = 0;
+          [dx, dy] = [-dy, dx];
+          turnCounter++;
+
+          if (turnCounter === 2) {
+            turnCounter = 0;
+            steps++;
+          }
+        }
+
+        if (x < 0 || x >= cols || y < 0 || y >= rows) break;
+      }
+    }
+
+    function initializeAgents() {
+      agents = Array.from({ length: agentCount }, () => ({
+        x: centerX,
+        y: centerY,
+        score: 0,
+        color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+      }));
+    }
+
+    function drawGrid() {
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          ctx.fillStyle = grid[y][x] === -1 ? '#FFD700' : '#ffffff';
+          ctx.strokeStyle = '#ccc';
+          ctx.fillRect(x * size, y * size, size, size);
+          ctx.strokeRect(x * size, y * size, size, size);
+        }
+      }
+    }
+
+    function drawAgents() {
+      agents.forEach(agent => {
+        ctx.fillStyle = agent.color;
+        ctx.beginPath();
+        ctx.arc(
+          agent.x * size + size / 2,
+          agent.y * size + size / 2,
+          size / 4,
+          0,
+          2 * Math.PI
+        );
+        ctx.fill();
+      });
+    }
+
+    function updateAgents() {
+      agents.forEach(agent => {
+        const actions = [
+          [0, -1], // Up
+          [0, 1], // Down
+          [-1, 0], // Left
+          [1, 0], // Right
+        ];
+        const action = actions[Math.floor(Math.random() * actions.length)];
+        const newX = agent.x + action[0];
+        const newY = agent.y + action[1];
+
+        if (newX >= 0 && newX < cols && newY >= 0 && newY < rows) {
+          agent.x = newX;
+          agent.y = newY;
+          if (grid[newY][newX] === -1) agent.score += 10; // Reward for prime
+        } else {
+          agent.score -= 5; // Penalty for trying to leave grid
+        }
+      });
+    }
+
+    function runSimulation() {
+      if (!running) return;
+      ctx.clearRect(0, 0, width, height);
+      drawGrid();
+      updateAgents();
+      drawAgents();
+      setTimeout(runSimulation, simulationDelay);
+    }
+
+    document.getElementById('startButton').onclick = () => {
+      generateUlamSpiral();
+      initializeAgents();
+      running = true;
+      runSimulation();
+      document.getElementById('startButton').disabled = true;
+      document.getElementById('resetButton').disabled = false;
+    };
+
+    document.getElementById('resetButton').onclick = () => {
+      ctx.clearRect(0, 0, width, height);
+      running = false;
+      agents = [];
+      grid = Array.from({ length: rows }, () => Array(cols).fill(0));
+      document.getElementById('startButton').disabled = false;
+      document.getElementById('resetButton').disabled = true;
+    };
+  </script>
+</body>
+</html>

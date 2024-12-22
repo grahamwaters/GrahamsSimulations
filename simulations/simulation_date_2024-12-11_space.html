@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solar System Simulation</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="solar-system"></canvas>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script>
+    const canvas = document.getElementById('solar-system');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const { Engine, Render, Runner, World, Bodies, Body, Vector } = Matter;
+
+    const engine = Engine.create();
+    const world = engine.world;
+
+    // Constants
+    const G = 0.001; // Adjusted Gravitational constant for better orbital dynamics
+    const STAR_RADIUS = 40;
+    const STAR_MASS = 5000; // Mass of the star
+
+    // Create the central star
+    const star = Bodies.circle(canvas.width / 2, canvas.height / 2, STAR_RADIUS, {
+      isStatic: true,
+      mass: STAR_MASS,
+      render: { fillStyle: 'yellow' }
+    });
+
+    World.add(world, star);
+
+    // Function to generate a random planet
+    function createPlanet(star, distance, radius, speed, color) {
+      const angle = Math.random() * Math.PI * 2;
+      const x = star.position.x + distance * Math.cos(angle);
+      const y = star.position.y + distance * Math.sin(angle);
+
+      const planet = Bodies.circle(x, y, radius, {
+        mass: 10 * radius,
+        render: { fillStyle: color },
+        frictionAir: 0
+      });
+
+      const velocityX = -speed * Math.sin(angle) * 1.2; // Increased magnitude for noticeable motion
+      const velocityY = speed * Math.cos(angle) * 1.2; // Increased magnitude for noticeable motion
+
+      Body.setVelocity(planet, { x: velocityX, y: velocityY });
+
+      return planet;
+    }
+
+    // Create random planets
+    const planets = [];
+    const planetCount = 5 + Math.floor(Math.random() * 5);
+
+    for (let i = 0; i < planetCount; i++) {
+      const distance = 100 + Math.random() * 300;
+      const radius = 5 + Math.random() * 20;
+      const speed = Math.sqrt(G * STAR_MASS / distance);
+      const color = `hsl(${Math.random() * 360}, 80%, 60%)`;
+
+      const planet = createPlanet(star, distance, radius, speed, color);
+      planets.push(planet);
+      World.add(world, planet);
+    }
+
+    // Function to generate random space debris
+    function createDebris(star, count) {
+      const debrisArray = [];
+      for (let i = 0; i < count; i++) {
+        const distance = 50 + Math.random() * 500;
+        const radius = 2 + Math.random() * 5;
+        const speed = Math.sqrt(G * STAR_MASS / distance) * (0.5 + Math.random());
+        const color = 'gray';
+
+        const debris = createPlanet(star, distance, radius, speed, color);
+        debrisArray.push(debris);
+        World.add(world, debris);
+      }
+      return debrisArray;
+    }
+
+    // Add space debris
+    const debris = createDebris(star, 50);
+
+    // Simulate gravitational attraction between star and planets
+    Matter.Events.on(engine, 'beforeUpdate', () => {
+      planets.concat(debris).forEach(body => {
+        const dx = star.position.x - body.position.x;
+        const dy = star.position.y - body.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > 5) {
+          const forceMagnitude = (G * STAR_MASS * body.mass) / (distance * distance);
+          const force = Vector.create(forceMagnitude * (dx / distance), forceMagnitude * (dy / distance));
+
+          Body.applyForce(body, body.position, force);
+        }
+      });
+    });
+
+    // Set up the renderer
+    const render = Render.create({
+      canvas,
+      engine,
+      options: {
+        width: canvas.width,
+        height: canvas.height,
+        wireframes: false,
+        background: 'black'
+      }
+    });
+
+    Render.run(render);
+
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    // Adjust canvas size on resize
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      render.options.width = canvas.width;
+      render.options.height = canvas.height;
+    });
+  </script>
+</body>
+</html>

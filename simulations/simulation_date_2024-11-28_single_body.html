@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Celestial Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="simulationCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const context = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let scale = 1;
+        const zoomSensitivity = 0.05;
+        let offsetX = 0, offsetY = 0;
+        let isDragging = false;
+        let startX, startY;
+        let stars = [];
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        class CelestialBody {
+            constructor(x, y, radius, mass, color) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.mass = mass;
+                this.color = color;
+            }
+
+            draw() {
+                context.save();
+                context.translate(offsetX, offsetY);
+                context.scale(scale, scale);
+
+                // Glow effect
+                const glow = context.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius * 1.5);
+                glow.addColorStop(0, this.color);
+                glow.addColorStop(1, 'black');
+
+                context.beginPath();
+                context.arc(this.x, this.y, this.radius * 1.5, 0, Math.PI * 2);
+                context.fillStyle = glow;
+                context.fill();
+
+                // Star itself
+                context.beginPath();
+                context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                context.fillStyle = this.color;
+                context.fill();
+
+                context.restore();
+            }
+        }
+
+        function generateStars(count) {
+            for (let i = 0; i < count; i++) {
+                stars.push({
+                    x: Math.random() * canvas.width / scale,
+                    y: Math.random() * canvas.height / scale,
+                    size: Math.random() * 3
+                });
+            }
+        }
+
+        function drawStars() {
+            stars.forEach(star => {
+                context.save();
+                context.translate(offsetX, offsetY);
+                context.scale(scale, scale);
+                context.beginPath();
+                context.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                context.fillStyle = '#FFF';
+                context.fill();
+                context.restore();
+            });
+        }
+
+        canvas.addEventListener('wheel', event => {
+            const deltaY = event.deltaY;
+            scale += deltaY * zoomSensitivity;
+            scale = Math.min(Math.max(.1, scale), 5); // Limit scale for zooming
+            draw();
+        });
+
+        canvas.addEventListener('mousedown', event => {
+            isDragging = true;
+            startX = event.clientX - offsetX;
+            startY = event.clientY - offsetY;
+        });
+
+        canvas.addEventListener('mousemove', event => {
+            if (isDragging) {
+                offsetX = event.clientX - startX;
+                offsetY = event.clientY - startY;
+                draw();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        function draw() {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            drawStars();
+            star.draw();
+        }
+
+        generateStars(200); // Generate 200 stars for the background
+        const star = new CelestialBody(canvas.width / 2, canvas.height / 2, 50, 1.989e30, getRandomColor());
+        draw();
+    </script>
+</body>
+</html>

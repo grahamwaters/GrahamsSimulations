@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solar System Simulation</title>
+  <style>
+    /* Page Styling */
+    body, html {
+      margin: 0;
+      overflow: hidden;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      background-color: #000; /* Space background */
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: white;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 8px;
+    }
+
+    #ui h1 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    #ui button {
+      background-color: #ffcc33;
+      border: none;
+      padding: 10px;
+      margin: 5px;
+      cursor: pointer;
+      border-radius: 5px;
+      color: black;
+      font-weight: bold;
+    }
+
+    #ui button:hover {
+      background-color: #ffaa22;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="solarSystem"></canvas>
+  <div id="ui">
+    <h1>Solar System Simulation</h1>
+    <button id="toggleOrbits">Toggle Orbits</button>
+    <button id="addPlanet">Add Random Planet</button>
+    <button id="resetSystem">Reset System</button>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // Scene Setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("solarSystem") });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+
+    // Global Constants and Variables
+    const G = 6.67430e-11; // Gravitational constant
+    let bodies = [];
+    let showOrbits = true;
+
+    // Lighting Setup
+    const light = new THREE.PointLight(0xffffff, 1, 500);
+    light.position.set(0, 0, 0);
+    light.castShadow = true;
+    scene.add(light);
+
+    // Utility Function: Generate a Random Color
+    function randomColor() {
+      return `#${Math.floor(Math.random() * 16777215).toString(16)}`;
+    }
+
+    // Create a Planet
+    function createPlanet(mass, radius, position, velocity) {
+      const geometry = new THREE.SphereGeometry(radius, 32, 32);
+      const material = new THREE.MeshStandardMaterial({ color: randomColor() });
+      const planet = new THREE.Mesh(geometry, material);
+
+      planet.mass = mass;
+      planet.velocity = new THREE.Vector3(velocity.x, velocity.y, velocity.z);
+      planet.position.set(position.x, position.y, position.z);
+      scene.add(planet);
+      bodies.push(planet);
+
+      if (showOrbits) drawOrbitPath(planet);
+      return planet;
+    }
+
+    // Create the Sun
+    function createSun(position) {
+        const sun = new THREE.Mesh(
+          new THREE.SphereGeometry(5, 32, 32),
+          new THREE.MeshStandardMaterial({ emissive: 0xffcc33, emissiveIntensity: 1 })
+        );
+        sun.mass = 1.989e30; // Sun's mass
+        sun.position.set(position.x, position.y, position.z);
+        scene.add(sun);
+        return sun;
+      }
+
+
+    // Draw Orbit Path
+    function drawOrbitPath(body) {
+      const orbitPath = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(
+          new Array(360).fill().map((_, i) => {
+            const angle = (i * Math.PI * 2) / 360;
+            return new THREE.Vector3(
+              body.position.x * Math.cos(angle),
+              body.position.y * Math.sin(angle),
+              0
+            );
+          })
+        ),
+        new THREE.LineBasicMaterial({ color: 0x888888 })
+      );
+      scene.add(orbitPath);
+    }
+
+    // Function: Add a Random Planet
+    function addRandomPlanet() {
+      const mass = Math.random() * 5e24 + 1e24; // Random mass between 1e24 and 6e24
+      const radius = Math.random() * 0.5 + 0.5; // Random radius between 0.5 and 1
+      const distance = Math.random() * 40 + 10; // Random distance from the sun
+      const speed = Math.sqrt((G * suns[0].mass) / distance); // Orbital speed
+      console.log('Creating planet with mass:', mass, 'radius:', radius);
+      createPlanet(mass, radius, { x: distance, y: 0, z: 0 }, { x: 0, y: speed, z: 0 });
+    }
+
+    // Function: Reset the System
+    function resetSystem() {
+      bodies.forEach((body) => scene.remove(body));
+      bodies = [];
+      initializeSolarSystem(); // Reinitialize with new random planets
+    }
+
+    // Update Physics
+    function updatePhysics(delta) {
+        for (let i = 0; i < bodies.length; i++) {
+          const bodyA = bodies[i];
+          let netForce = new THREE.Vector3();
+
+          for (let j = 0; j < bodies.length; j++) {
+            if (i === j) continue;
+
+            const bodyB = bodies[j];
+            const toOther = new THREE.Vector3().subVectors(bodyB.position, bodyA.position);
+            const distance = toOther.length();
+            const safeDistance = Math.max(distance, 0.1);
+
+            const forceMagnitude = (G * bodyA.mass * bodyB.mass) / (safeDistance * safeDistance);
+            const force = toOther.normalize().multiplyScalar(forceMagnitude);
+            netForce.add(force);
+          }
+
+          bodyA.velocity.add(netForce.multiplyScalar(delta / bodyA.mass));
+          bodyA.position.add(bodyA.velocity.clone().multiplyScalar(delta));
+
+          console.log('Updated position for body:', bodyA.position); // Debugging
+        }
+    }
+
+
+    // Animation Loop
+    function animate() {
+        requestAnimationFrame(animate);
+        updatePhysics(0.01); // Update positions
+        renderer.render(scene, camera); // Render the scene
+        console.log('Animation running'); // Debugging: Ensure this is called
+      }
+
+
+    // Initialize Solar System
+    let suns = [];
+    function initializeSolarSystem() {
+      suns = [
+        createSun({ x: 0, y: 0, z: 0 }),
+      ];
+
+      for (let i = 0; i < 10; i++) {
+        addRandomPlanet(); // Automatically add random planets
+      }
+    }
+
+    // Start the Simulation
+    document.getElementById("toggleOrbits").addEventListener("click", () => {
+      showOrbits = !showOrbits;
+      scene.children = scene.children.filter((obj) => !(obj.type === "Line"));
+      if (showOrbits) bodies.forEach((body) => drawOrbitPath(body));
+    });
+
+    document.getElementById("addPlanet").addEventListener("click", addRandomPlanet);
+    document.getElementById("resetSystem").addEventListener("click", resetSystem);
+
+    // Launch Solar System
+    initializeSolarSystem();
+    animate();
+  </script>
+</body>
+</html>

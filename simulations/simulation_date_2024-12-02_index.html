@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expecto SpriteGoals</title>
+    <style>
+        :root {
+            --primary-color: #6e8efb;
+            --secondary-color: #a777e3;
+            --bg-color: #f5f5f5;
+            --text-color: #333;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: var(--text-color);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 2rem;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .preview {
+            background: #fff;
+            padding: 1.5rem;
+            border-radius: 10px;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .sprite-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 1rem;
+            padding: 1rem;
+        }
+
+        .sprite-cell {
+            background: #f0f0f0;
+            aspect-ratio: 1;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .export-options {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Expecto SpriteGoals</h1>
+            <p>AI-Powered Sprite Generation System</p>
+        </div>
+
+        <div class="workspace">
+            <div class="controls">
+                <input type="file" id="spriteInput" accept=".png,.jpg,.jpeg,.svg" style="display: none">
+                <button class="btn" onclick="document.getElementById('spriteInput').click()">
+                    Upload Sprite
+                </button>
+
+                <div class="settings">
+                    <h3>Generation Settings</h3>
+                    <div class="setting-group">
+                        <label>Rotation Step</label>
+                        <input type="range" min="15" max="90" step="15" value="15">
+                    </div>
+                    <div class="setting-group">
+                        <label>Scale Range</label>
+                        <input type="range" min="50" max="150" value="100">
+                    </div>
+                </div>
+
+                <div class="export-options">
+                    <h3>Export Options</h3>
+                    <select id="exportFormat">
+                        <option value="png">PNG Sequence</option>
+                        <option value="spritesheet">Sprite Sheet</option>
+                        <option value="gif">Animated GIF</option>
+                    </select>
+                    <button class="btn" onclick="exportSprites()">Export</button>
+                </div>
+            </div>
+
+            <div class="preview">
+                <div id="originalSprite"></div>
+                <div class="sprite-grid" id="generatedSprites"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class SpriteManager {
+            constructor() {
+                this.originalSprite = null;
+                this.generatedSprites = [];
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                document.getElementById('spriteInput').addEventListener('change', (e) => {
+                    this.handleSpriteUpload(e);
+                });
+            }
+
+            async handleSpriteUpload(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                try {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.originalSprite = e.target.result;
+                        this.displayOriginalSprite();
+                        this.generateSprites();
+                    };
+                    reader.readAsDataURL(file);
+                } catch (error) {
+                    console.error('Error uploading sprite:', error);
+                    alert('Error uploading sprite. Please try again.');
+                }
+            }
+
+            displayOriginalSprite() {
+                const container = document.getElementById('originalSprite');
+                container.innerHTML = `
+                    <h3>Original Sprite</h3>
+                    <img src="${this.originalSprite}" alt="Original Sprite">
+                `;
+            }
+
+            async generateSprites() {
+                try {
+                    // Simulate API call to Python backend
+                    const response = await fetch('/api/generate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            sprite: this.originalSprite,
+                            settings: this.getGenerationSettings()
+                        })
+                    });
+
+                    if (!response.ok) throw new Error('Generation failed');
+
+                    const data = await response.json();
+                    this.generatedSprites = data.sprites;
+                    this.displayGeneratedSprites();
+                } catch (error) {
+                    console.error('Error generating sprites:', error);
+                    alert('Error generating sprites. Please try again.');
+                }
+            }
+
+            getGenerationSettings() {
+                return {
+                    rotationStep: document.querySelector('input[type="range"]').value,
+                    scale: document.querySelector('input[type="range"]').value / 100
+                };
+            }
+
+            displayGeneratedSprites() {
+                const container = document.getElementById('generatedSprites');
+                container.innerHTML = this.generatedSprites.map(sprite => `
+                    <div class="sprite-cell">
+                        <img src="${sprite.url}" alt="Generated Sprite">
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Initialize the application
+        const spriteManager = new SpriteManager();
+
+        // Export function
+        async function exportSprites() {
+            const format = document.getElementById('exportFormat').value;
+            try {
+                const response = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        sprites: spriteManager.generatedSprites,
+                        format: format
+                    })
+                });
+
+                if (!response.ok) throw new Error('Export failed');
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `sprites.${format}`;
+                a.click();
+            } catch (error) {
+                console.error('Error exporting sprites:', error);
+                alert('Error exporting sprites. Please try again.');
+            }
+        }
+    </script>
+</body>
+</html>

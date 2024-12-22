@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rogue Moons with Q-Table Exploration</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+        .score-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .score-box {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="score-container" id="scoreContainer"></div>
+<canvas id="solarSystem"></canvas>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const G = 0.0001; // Gravitational constant
+    const rogueMoonSpeedFactor = 3.0; // Speed multiplier
+    const qTable = {}; // Q-Table for directed exploration
+    const actions = [
+        {dx: 0.02, dy: 0},
+        {dx: -0.02, dy: 0},
+        {dx: 0, dy: 0.02},
+        {dx: 0, dy: -0.02},
+        {dx: 0, dy: 0} // No action
+    ];
+    const epsilon = 0.1; // Exploration rate
+    const alpha = 0.5; // Learning rate
+    const gamma = 0.9; // Discount factor
+    const epochDuration = 30000; // Epoch duration in ms
+
+    const scores = [];
+    const rogueMoons = [];
+    const particleClouds = [];
+    const spaceJunk = [];
+    const planets = [];
+    let medianPlanetMass = 0;
+
+    class QuadTree {
+        constructor(boundary, capacity) {
+            this.boundary = boundary; // Rectangle boundary
+            this.capacity = capacity; // Max number of particles
+            this.particles = [];
+            this.divided = false;
+        }
+
+        subdivide() {
+            const { x, y, w, h } = this.boundary;
+            const nw = new Rectangle(x, y, w / 2, h / 2);
+            const ne = new Rectangle(x + w / 2, y, w / 2, h / 2);
+            const sw = new Rectangle(x, y + h / 2, w / 2, h / 2);
+            const se = new Rectangle(x + w / 2, y + h / 2, w / 2, h / 2);
+
+            this.northwest = new QuadTree(nw, this.capacity);
+            this.northeast = new QuadTree(ne, this.capacity);
+            this.southwest = new QuadTree(sw, this.capacity);
+            this.southeast = new QuadTree(se, this.capacity);
+
+            this.divided = true;
+        }
+
+        insert(particle) {
+            if (!this.boundary.contains(particle)) return false;
+
+            if (this.particles.length < this.capacity) {
+                this.particles.push(particle);
+                return true;
+            }
+
+            if (!this.divided) this.subdivide();
+
+            if (this.northwest.insert(particle) || this.northeast.insert(particle) ||
+                this.southwest.insert(particle) || this.southeast.insert(particle)) {
+                return true;
+            }
+
+            return false;
+        }
+
+        query(range, found = []) {
+            if (!this.boundary.intersects(range)) return found;
+
+            for (const p of this.particles) {
+                if (range.contains(p)) found.push(p);
+            }
+
+            if (this.divided) {
+                this.northwest.query(range, found);
+                this.northeast.query(range, found);
+                this.southwest.query(range, found);
+                this.southeast.query(range, found);
+            }
+
+            return found;
+        }
+    }
+
+    class Rectangle {
+        constructor(x, y, w, h) {
+            this.x = x; this.y = y; this.w = w; this.h = h;
+        }
+
+        contains(particle) {
+            return (particle.x >= this.x &&
+                    particle.x < this.x + this.w &&
+                    particle.y >= this.y &&
+                    particle.y < this.y + this.h);
+        }
+
+        intersects(range) {
+            return !(range.x > this.x + this.w || range.x + range.w < this.x ||
+                     range.y > this.y + this.h || range.y + range.h < this.y);
+        }
+    }
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+            this.isRogueMoon = false;
+            this.thrustDuration = 0;
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+
+            if (this.isRogueMoon && this.thrustDuration > 0) {
+                ctx.beginPath();
+                const direction = Math.atan2(-this.velocity.y, -this.velocity.x);
+                const thrusterX = this.x + Math.cos(direction) * this.radius * 1.5;
+                const thrusterY = this.y + Math.sin(direction) * this.radius * 1.5;
+                ctx.arc(thrusterX, thrusterY, 2, 0, Math.PI * 2, false);
+                ctx.fillStyle = 'orange';
+                ctx.fill();
+                this.thrustDuration--;
+            }
+        }
+
+        update(planets, action = {dx: 0, dy: 0}) {
+            if (this.isRogueMoon) {
+                this.velocity.x += action.dx * rogueMoonSpeedFactor;
+                this.velocity.y += action.dy * rogueMoonSpeedFactor;
+                this.thrustDuration = 5;
+            }
+
+            planets.forEach(planet => {
+                if (planet !== this && !(this.color === 'yellow' && planet.color === 'yellow')) { // Skip self-gravity for the sun
+                    const dx = planet.x - this.x;
+                    const dy = planet.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < this.radius + planet.radius) {
+                        if (this.mass < planet.mass) {
+                            this.explode(); // Smaller body breaks into particles
+                        } else {
+                            planet.absorb(this); // Larger body absorbs the smaller one
+                        }
+                    }
+
+                    const force = G * (this.mass * planet.mass) / (dist * dist);
+                    const accel = force / this.mass;
+                    this.velocity.x += (dx / dist) * accel;
+                    this.velocity.y += (dy / dist) * accel;
+                }
+            });
+
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+        }
+
+
+        explode() {
+            if (this.color === 'yellow' && this.mass === 100000) return; // Prevent the sun from exploding
+
+
+            const totalArea = Math.PI * this.radius * this.radius; // Calculate original surface area
+            let remainingArea = totalArea;
+
+            while (remainingArea > 0) {
+                const particleRadius = Math.min(Math.sqrt(remainingArea / Math.PI), Math.random() * 2 + 1);
+                const particleArea = Math.PI * particleRadius * particleRadius;
+
+                particleClouds.push({
+                    x: this.x + (Math.random() - 0.5) * this.radius,
+                    y: this.y + (Math.random() - 0.5) * this.radius,
+                    vx: this.velocity.x + (Math.random() - 0.5) * 0.1,
+                    vy: this.velocity.y + (Math.random() - 0.5) * 0.1,
+                    size: particleRadius,
+                    color: this.color
+                });
+
+                remainingArea -= particleArea;
+            }
+
+            if (this.isRogueMoon) {
+                const index = rogueMoons.indexOf(this);
+                rogueMoons.splice(index, 1); // Remove rogue moon
+                regenerateRogueMoon(index); // Regenerate the rogue moon
+            }
+
+        }
+
+
+
+        absorb(smallerBody) {
+            this.mass += smallerBody.mass; // Add the mass of the smaller body
+            const combinedArea = Math.PI * this.radius * this.radius + Math.PI * smallerBody.radius * smallerBody.radius;
+            this.radius = Math.sqrt(combinedArea / Math.PI); // Recalculate radius based on new surface area
+
+            if (smallerBody.isRogueMoon) {
+                rogueMoons.splice(rogueMoons.indexOf(smallerBody), 1); // Remove the smaller rogue moon
+            } else {
+                planets.splice(planets.indexOf(smallerBody), 1); // Remove the smaller planet
+            }
+        }
+
+        isOffScreen() {
+            return this.x < -50 || this.x > canvas.width + 50 || this.y < -50 || this.y > canvas.height + 50;
+        }
+    }
+
+
+    class ParticleCloud {
+        constructor(x, y, radius, color, velocity) {
+            const originalArea = Math.PI * radius * radius; // Calculate original object area
+            const maxParticles = 20; // Limit the number of particles
+            let totalParticleArea = 0;
+
+            this.particles = [];
+
+            for (let i = 0; i < maxParticles && totalParticleArea < originalArea; i++) {
+                const particleRadius = Math.random() * 2 + 1; // Particle radius between 1 and 3
+                const particleArea = Math.PI * particleRadius * particleRadius;
+
+                // Check if adding this particle exceeds the original area
+                if (totalParticleArea + particleArea > originalArea) break;
+
+                this.particles.push({
+                    x: x + Math.random() * radius - radius / 2,
+                    y: y + Math.random() * radius - radius / 2,
+                    vx: velocity.x + (Math.random() - 0.5) * 0.1,
+                    vy: velocity.y + (Math.random() - 0.5) * 0.1,
+                    size: particleRadius,
+                    color,
+                });
+
+                totalParticleArea += particleArea;
+            }
+        }
+
+        update(planets, action = {dx: 0, dy: 0}) {
+            if (this.isRogueMoon) {
+                this.velocity.x += action.dx * rogueMoonSpeedFactor;
+                this.velocity.y += action.dy * rogueMoonSpeedFactor;
+                this.thrustDuration = 5;
+            }
+
+            planets.forEach(planet => {
+                if (planet !== this) {
+                    const dx = planet.x - this.x;
+                    const dy = planet.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < this.radius + planet.radius) {
+                        if (planet.color === 'yellow' && this !== planet) {
+                            // Space junk colliding with the sun
+                            this.explode();
+                        } else if (this.mass < planet.mass) {
+                            this.explode(); // Smaller body breaks into particles
+                        } else {
+                            planet.absorb(this); // Larger body absorbs the smaller one
+                        }
+                    }
+
+                    const force = G * (this.mass * planet.mass) / (dist * dist);
+                    const accel = force / this.mass;
+                    this.velocity.x += (dx / dist) * accel;
+                    this.velocity.y += (dy / dist) * accel;
+                }
+            });
+
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+        }
+
+
+        draw() {
+            this.particles.forEach(particle => {
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2, false);
+                ctx.fillStyle = `rgba(${parseInt(particle.color.substring(1, 3), 16)}, ${
+                    parseInt(particle.color.substring(3, 5), 16)}, ${
+                    parseInt(particle.color.substring(5, 7), 16)}, 0.5)`; // Add transparency
+                ctx.fill();
+            });
+        }
+
+    }
+
+    function drawTrails(entity) {
+        ctx.beginPath();
+        ctx.moveTo(entity.x, entity.y);
+        ctx.lineTo(entity.x - entity.velocity.x * 5, entity.y - entity.velocity.y * 5); // Trail direction
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; // Add transparency
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+
+    function initializePlanets(numPlanets) {
+        for (let i = 0; i < numPlanets; i++) {
+            const radius = Math.random() * (15 - 5) + 5;
+            const distance = Math.random() * (canvas.width / 4 - 50) + 50;
+            const angle = Math.random() * Math.PI * 2;
+            const x = canvas.width / 2 + distance * Math.cos(angle);
+            const y = canvas.height / 2 + distance * Math.sin(angle);
+            const mass = Math.random() * (50 - 10) + 10;
+            const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+
+            // Circular orbital velocity
+            const velocity = {
+                x: -Math.sin(angle) * Math.sqrt(G * 100000 / distance),
+                y: Math.cos(angle) * Math.sqrt(G * 100000 / distance)
+            };
+
+            planets.push(new CelestialBody(x, y, radius, mass, color, velocity));
+        }
+
+        const sortedMasses = planets.map(planet => planet.mass).sort((a, b) => a - b);
+        const mid = Math.floor(sortedMasses.length / 2);
+        medianPlanetMass = sortedMasses.length % 2 !== 0 ? sortedMasses[mid] : (sortedMasses[mid - 1] + sortedMasses[mid]) / 2;
+    }
+
+    function createSun() {
+        const sun = new CelestialBody(
+            canvas.width / 2,
+            canvas.height / 2,
+            30, // Sun radius
+            100000, // Sun mass
+            'yellow', // Sun color
+            {x: 0, y: 0} // No velocity for the sun
+        );
+        planets.push(sun);
+    }
+
+    function createRogueMoons(numMoons) {
+        rogueMoons.length = 0; // Clear rogue moons
+        for (let i = 0; i < numMoons; i++) {
+            const radius = 10;
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const velocity = {x: (Math.random() - 0.5) * 0.2, y: (Math.random() - 0.5) * 0.2};
+            const moon = new CelestialBody(x, y, radius, 50, 'white', velocity);
+            moon.isRogueMoon = true;
+            rogueMoons.push(moon);
+            scores[i] = scores[i] || 0;
+        }
+        assignTargetsToRogueMoons(); // Reassign targets after creating moons
+    }
+
+    CelestialBody.prototype.isOffScreen = function () {
+        return this.x < -50 || this.x > canvas.width + 50 || this.y < -50 || this.y > canvas.height + 50;
+    };
+
+    //Qtable swarm learning
+    const sharedQTable = {}; // Shared Q-Table for swarm learning
+
+    function updateQTable(index, state, actionIndex, reward, nextState) {
+        if (!sharedQTable[state]) sharedQTable[state] = new Array(actions.length).fill(0);
+
+        const currentQ = sharedQTable[state][actionIndex];
+        const maxFutureQ = Math.max(...sharedQTable[nextState] || [0]);
+        const newQ = (1 - alpha) * currentQ + alpha * (reward + gamma * maxFutureQ);
+
+        sharedQTable[state][actionIndex] = newQ;
+    }
+
+
+    function getState(moon) {
+        const xState = Math.floor(moon.x / 100);
+        const yState = Math.floor(moon.y / 100);
+        const vxState = Math.floor(moon.velocity.x * 100);
+        const vyState = Math.floor(moon.velocity.y * 100);
+        return `${xState},${yState},${vxState},${vyState}`;
+    }
+
+    function initializeQTable(moons) {
+        moons.forEach((moon, index) => {
+            if (!qTable[index]) qTable[index] = {};
+        });
+    }
+
+    function updateQTable(index, state, actionIndex, reward, nextState) {
+        if (!qTable[index][state]) qTable[index][state] = new Array(actions.length).fill(0);
+        if (!qTable[index][nextState]) qTable[index][nextState] = new Array(actions.length).fill(0);
+
+        const currentQ = qTable[index][state][actionIndex];
+        const maxFutureQ = Math.max(...qTable[index][nextState]);
+        const newQ = (1 - alpha) * currentQ + alpha * (reward + gamma * maxFutureQ);
+
+        qTable[index][state][actionIndex] = newQ;
+    }
+
+    function calculateReward(moon) {
+        let reward = 1;
+
+        if (Math.abs(moon.velocity.x) > 0.5 || Math.abs(moon.velocity.y) > 0.5) {
+            reward += 5;
+        }
+
+        if (moon.isOffScreen()) {
+            reward -= 20;
+        }
+
+        return reward;
+    }
+
+    function rogueMoonActions() {
+        return rogueMoons.map((moon, index) => {
+            const state = getState(moon);
+            const actionIndex = selectAction(moon, index);
+            const action = actions[actionIndex];
+
+            const nextState = getState(moon);
+            const reward = calculateReward(moon);
+            updateQTable(index, state, actionIndex, reward, nextState);
+
+            return action;
+        });
+    }
+
+    // update --> now uses the shared swarm q table.
+    function selectAction(moon, index) {
+        const state = getState(moon);
+        if (Math.random() < epsilon || !sharedQTable[state]) {
+            return Math.floor(Math.random() * actions.length);
+        } else {
+            return sharedQTable[state].indexOf(Math.max(...sharedQTable[state]));
+        }
+    }
+
+
+    function generateSpaceJunk() {
+        if (spaceJunk.length > 100) return; // Limit the total number of space junk
+
+        const maxSize = medianPlanetMass / 10;
+        spaceJunk.push(new CelestialBody(
+            Math.random() * canvas.width,
+            Math.random() * canvas.height,
+            Math.random() * maxSize,
+            maxSize,
+            'gray',
+            {x: (Math.random() - 0.5) * 0.2, y: (Math.random() - 0.5) * 0.2}
+        ));
+    }
+    //when rogue moons are destroyed or die off they are regenerated.
+    function regenerateRogueMoon(index) {
+        setTimeout(() => {
+            const radius = 10;
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const velocity = {x: (Math.random() - 0.5) * 0.2, y: (Math.random() - 0.5) * 0.2};
+            const moon = new CelestialBody(x, y, radius, 50, 'white', velocity);
+            moon.isRogueMoon = true;
+            rogueMoons[index] = moon; // Regenerate moon in its index slot
+        }, 3000); // 3-second delay
+    }
+
+    // targets for rogue moons
+    function assignTargetsToRogueMoons() {
+        rogueMoons.forEach(moon => {
+            const target = planets[Math.floor(Math.random() * planets.length)];
+            moon.target = target;
+        });
+    }
+
+    function calculateReward(moon) {
+        let reward = 1;
+
+        if (moon.target) {
+            const dx = moon.target.x - moon.x;
+            const dy = moon.target.y - moon.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < moon.target.radius * 2) {
+                reward += 10; // Reward for reaching target
+            }
+        }
+
+        if (Math.abs(moon.velocity.x) > 0.5 || Math.abs(moon.velocity.y) > 0.5) {
+            reward += 5;
+        }
+
+        if (moon.isOffScreen()) {
+            reward -= 20;
+        }
+
+        return reward;
+    }
+    // q table visuals
+    function updateScores() {
+        rogueMoons.forEach((moon, index) => {
+            if (moon.isOffScreen()) {
+                scores[index] -= 10; // Penalty for going off-screen
+                rogueMoons.splice(index, 1); // Remove rogue moon
+            } else {
+                scores[index] += 1; // Reward for survival
+            }
+        });
+
+        scoreContainer.innerHTML = rogueMoons
+            .map((_, i) => `<div class="score-box">Moon ${i + 1}: ${scores[i]}</div>`)
+            .join('');
+    }
+
+
+
+
+    function animate() {
+        requestAnimationFrame(animate);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const actions = rogueMoonActions();
+
+        planets.forEach(planet => planet.update(planets));
+        rogueMoons.forEach((moon, index) => moon.update(planets, actions[index]));
+        particleClouds.forEach(cloud => cloud.update(planets));
+        spaceJunk.forEach((junk, index) => {
+            junk.update(planets);
+            if (junk.isOffScreen()) spaceJunk.splice(index, 1); // Remove off-screen space junk
+        });
+
+        [...planets, ...rogueMoons, ...particleClouds, ...spaceJunk].forEach(entity => {
+            entity.draw();
+            drawTrails(entity); // Add trails for visualization
+        });
+
+        updateScores(); // Update rogue moon scores
+    }
+
+
+
+    function assignTargetsToRogueMoons() {
+        rogueMoons.forEach(moon => {
+            const target = planets[Math.floor(Math.random() * planets.length)];
+            moon.target = target;
+        });
+    }
+
+
+
+
+    createSun(); // Add the sun before initializing other planets
+
+    initializePlanets(5);
+    createRogueMoons(2);
+    // Call this after creating rogue moons
+    assignTargetsToRogueMoons();
+    initializeQTable(rogueMoons);
+    setInterval(generateSpaceJunk, 500);
+    animate();
+</script>
+</body>
+</html>
