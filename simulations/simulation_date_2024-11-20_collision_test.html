@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Collision Test</title>
+  <script src="../app.js"></script>
+</head>
+<body>
+  <canvas id="testCanvas"></canvas>
+  <script>
+    createPlanet(5e24, 1, { x: -10, y: 0, z: 0 }, { x: 0.5, y: 0, z: 0 });
+    createPlanet(5e24, 1, { x: 10, y: 0, z: 0 }, { x: -0.5, y: 0, z: 0 });
+    animate();
+  </script>
+</body>
+</html>

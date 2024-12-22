@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binary Star System Simulation</title>
+  <style>
+    body, html {
+      height: 100%;
+      margin: 0;
+      background: black;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    #scoreboard {
+      display: flex;
+      justify-content: space-evenly;
+      align-items: center;
+      position: fixed;
+      top: 0;
+      width: 100%;
+      color: white;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px;
+      font-size: 18px;
+      z-index: 10;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="scoreboard">
+    <div id="agent1-score">Agent 1 Score: 0</div>
+    <div id="agent2-score">Agent 2 Score: 0</div>
+    <div id="agent3-score">Agent 3 Score: 0</div>
+    <div id="agent4-score">Agent 4 Score: 0</div>
+    <div id="epoch">Epoch: 1</div>
+  </div>
+  <canvas id="orbitCanvas"></canvas>
+  <script>
+    const canvas = document.getElementById('orbitCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const G = 5; // Adjusted gravitational constant for screen scale
+    const timeStep = 0.1; // Time step for simulation
+    const stars = [
+      { x: canvas.width / 3, y: canvas.height / 2, radius: 50, mass: 1000, color: 'yellow' },
+      { x: (2 * canvas.width) / 3, y: canvas.height / 2, radius: 50, mass: 1000, color: 'orange' }
+    ];
+    const planets = [
+      { semiMajorAxis: 300, semiMinorAxis: 150, mass: 500, radius: 20, color: 'blue', angle: 0, angularVelocity: 0.01 },
+      { semiMajorAxis: 400, semiMinorAxis: 200, mass: 400, radius: 15, color: 'green', angle: Math.PI / 2, angularVelocity: 0.02 },
+      { semiMajorAxis: 500, semiMinorAxis: 250, mass: 600, radius: 25, color: 'red', angle: Math.PI, angularVelocity: 0.015 },
+      { semiMajorAxis: 600, semiMinorAxis: 300, mass: 300, radius: 10, color: 'purple', angle: 3 * Math.PI / 2, angularVelocity: 0.012 }
+    ];
+    let agents = [];
+    let currentEpoch = 1;
+
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function drawCircle(x, y, radius, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    function updatePlanets() {
+      planets.forEach((planet, index) => {
+        const star = index % 2 === 0 ? stars[0] : stars[1];
+        planet.angle += planet.angularVelocity;
+        planet.x = star.x + planet.semiMajorAxis * Math.cos(planet.angle);
+        planet.y = star.y + planet.semiMinorAxis * Math.sin(planet.angle);
+      });
+    }
+
+    function drawEnvironment() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw stars
+      stars.forEach(star => drawCircle(star.x, star.y, star.radius, star.color));
+
+      // Draw planets
+      planets.forEach(planet => drawCircle(planet.x, planet.y, planet.radius, planet.color));
+
+      // Draw agents
+      agents.forEach(agent => drawCircle(agent.x, agent.y, agent.radius, 'white'));
+    }
+
+    function gravitationalForce(body1, body2) {
+      const dx = body2.x - body1.x;
+      const dy = body2.y - body1.y;
+      const distanceSquared = dx * dx + dy * dy;
+      const softening = 1e-2;
+      const distance = Math.sqrt(distanceSquared + softening);
+      const force = G * (body1.mass * body2.mass) / distanceSquared;
+      const angle = Math.atan2(dy, dx);
+      return { fx: force * Math.cos(angle), fy: force * Math.sin(angle) };
+    }
+
+    function applyGravity() {
+      agents.forEach(agent => {
+        stars.forEach(star => {
+          const force = gravitationalForce(agent, star);
+          agent.vx += force.fx / agent.mass * timeStep;
+          agent.vy += force.fy / agent.mass * timeStep;
+        });
+        planets.forEach(planet => {
+          const force = gravitationalForce(agent, planet);
+          agent.vx += force.fx / agent.mass * timeStep;
+          agent.vy += force.fy / agent.mass * timeStep;
+        });
+      });
+    }
+
+    function spawnAgent() {
+      return {
+        x: randomInRange(canvas.width / 2 - 50, canvas.width / 2 + 50),
+        y: randomInRange(canvas.height / 2 - 50, canvas.height / 2 + 50),
+        vx: randomInRange(-0.1, 0.1),
+        vy: randomInRange(-0.1, 0.1),
+        radius: 10,
+        mass: 1,
+        score: 0
+      };
+    }
+
+    function resetEpoch() {
+      currentEpoch++;
+      document.getElementById('epoch').textContent = `Epoch: ${currentEpoch}`;
+      agents = Array.from({ length: 4 }, spawnAgent);
+    }
+
+    function gameLoop() {
+      applyGravity();
+      updatePlanets();
+
+      agents.forEach(agent => {
+        agent.x += agent.vx * timeStep;
+        agent.y += agent.vy * timeStep;
+      });
+
+      drawEnvironment();
+      requestAnimationFrame(gameLoop);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      resetEpoch();
+      gameLoop();
+    });
+  </script>
+</body>
+</html>

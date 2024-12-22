@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Planetary Physics Simulation</title>
+  <style>
+    body, html {
+      height: 100%;
+      margin: 0;
+      background: black;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    #scoreboard {
+      display: flex;
+      justify-content: space-evenly;
+      align-items: center;
+      position: fixed;
+      top: 0;
+      width: 100%;
+      color: white;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px;
+      font-size: 18px;
+      z-index: 10;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="scoreboard">
+    <div id="agent1-score">Agent 1 Score: 0</div>
+    <div id="agent2-score">Agent 2 Score: 0</div>
+    <div id="agent3-score">Agent 3 Score: 0</div>
+    <div id="agent4-score">Agent 4 Score: 0</div>
+    <div id="epoch">Epoch: 1</div>
+  </div>
+  <canvas id="orbitCanvas"></canvas>
+  <script>
+    // Canvas setup
+    const canvas = document.getElementById('orbitCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Constants and Variables
+    const G = 0.01; // Gravitational constant
+    const sun = { x: canvas.width / 2, y: canvas.height / 2, radius: 50, mass: 1000 };
+    const planets = [
+      { x: canvas.width / 2 + 200, y: canvas.height / 3, radius: 20, mass: 500, color: 'blue', semiMajorAxis: 300, semiMinorAxis: 150, angle: 0, angularVelocity: 0.01 },
+      { x: canvas.width / 2 - 200, y: 2 * canvas.height / 3, radius: 20, mass: 500, color: 'green', semiMajorAxis: 400, semiMinorAxis: 200, angle: Math.PI, angularVelocity: 0.02 }
+    ];
+    let agents = [];
+    let currentEpoch = 1;
+
+    // Helper Functions
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function drawCircle(x, y, radius, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    // Policy Gradient Setup
+    const ACTIONS = ['thrust-up', 'thrust-down', 'thrust-left', 'thrust-right', 'drift'];
+
+    function initializePolicy() {
+      return ACTIONS.reduce((policy, action) => {
+        policy[action] = Math.random(); // Random initial probabilities
+        return policy;
+      }, {});
+    }
+
+    function softmax(policy) {
+      const sum = Object.values(policy).reduce((a, b) => a + Math.exp(b), 0);
+      return Object.fromEntries(
+        Object.entries(policy).map(([action, value]) => [action, Math.exp(value) / sum])
+      );
+    }
+
+    function selectAction(policy) {
+      const softmaxPolicy = softmax(policy);
+      const rand = Math.random();
+      let cumulative = 0;
+      for (const [action, probability] of Object.entries(softmaxPolicy)) {
+        cumulative += probability;
+        if (rand < cumulative) return action;
+      }
+      return 'drift'; // Default to drift
+    }
+
+    function updatePolicy(policy, action, reward) {
+      const learningRate = 0.10;
+      const softmaxPolicy = softmax(policy);
+      for (const act of Object.keys(policy)) {
+        const gradient = act === action ? 1 - softmaxPolicy[act] : -softmaxPolicy[act];
+        policy[act] += learningRate * reward * gradient;
+      }
+    }
+
+    function getCurrentState(agent) {
+      return [agent.x, agent.y, agent.vx, agent.vy]
+        .concat(planets.flatMap(planet => [planet.x, planet.y]))
+        .join('-');
+    }
+
+    function calculateReward(agent) {
+      let reward = 0;
+
+      // Gravity-based reward
+      planets.forEach(planet => {
+        const distance = Math.hypot(agent.x - planet.x, agent.y - planet.y);
+        if (distance < planet.radius * 5) reward += G * planet.mass / Math.max(distance * distance, 1);
+      });
+
+      const distanceFromSun = Math.hypot(agent.x - sun.x, agent.y - sun.y);
+      if (distanceFromSun < sun.radius * 8) {
+        reward += G * sun.mass / Math.max(distanceFromSun * distanceFromSun, 1);
+      } else {
+        reward -= 10; // Penalty for being far from the sun
+      }
+
+      return reward;
+    }
+
+    function agentBehavior(agent) {
+      const action = selectAction(agent.policy);
+      const thrust = 0.1;
+      switch (action) {
+        case 'thrust-up': agent.vy -= thrust; break;
+        case 'thrust-down': agent.vy += thrust; break;
+        case 'thrust-left': agent.vx -= thrust; break;
+        case 'thrust-right': agent.vx += thrust; break;
+      }
+      const reward = calculateReward(agent);
+      updatePolicy(agent.policy, action, reward);
+
+      agent.score += reward;
+      if (agent.score < -20000) {
+        resetEpoch();
+      }
+      document.getElementById(`agent${agents.indexOf(agent) + 1}-score`).textContent = `Agent ${agents.indexOf(agent) + 1} Score: ${Math.round(agent.score)}`;
+    }
+
+    // Physics and Gravity
+    function applyGravity() {
+      agents.forEach(agent => {
+        const dx = sun.x - agent.x;
+        const dy = sun.y - agent.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const force = G * sun.mass / Math.max(dist * dist, 1);
+        const angle = Math.atan2(dy, dx);
+        agent.vx += force * Math.cos(angle);
+        agent.vy += force * Math.sin(angle);
+      });
+    }
+
+    function updatePlanets() {
+      planets.forEach(planet => {
+        planet.angle += planet.angularVelocity;
+        planet.x = sun.x + planet.semiMajorAxis * Math.cos(planet.angle);
+        planet.y = sun.y + planet.semiMinorAxis * Math.sin(planet.angle);
+      });
+    }
+
+    function drawEnvironment() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw Sun
+      drawCircle(sun.x, sun.y, sun.radius, 'orange');
+
+      // Draw Planets
+      planets.forEach(planet => drawCircle(planet.x, planet.y, planet.radius, planet.color));
+
+      // Draw Agents
+      agents.forEach(agent => drawCircle(agent.x, agent.y, agent.radius, 'red'));
+    }
+
+    function spawnAgent() {
+      return {
+        x: randomInRange(canvas.width / 2 - 50, canvas.width / 2 + 50),
+        y: randomInRange(canvas.height / 2 - 50, canvas.height / 2 + 50),
+        vx: randomInRange(-0.1, 0.1),
+        vy: randomInRange(-0.1, 0.1),
+        radius: 10,
+        policy: initializePolicy(),
+        score: 0
+      };
+    }
+
+    function resetEpoch() {
+      currentEpoch++;
+      document.getElementById('epoch').textContent = `Epoch: ${currentEpoch}`;
+      agents = Array.from({ length: 4 }, spawnAgent);
+      gameLoop()
+    }
+
+    function gameLoop() {
+      applyGravity();
+      updatePlanets();
+      agents.forEach(agent => {
+        agentBehavior(agent);
+        agent.x += agent.vx;
+        agent.y += agent.vy;
+      });
+      drawEnvironment();
+      requestAnimationFrame(gameLoop);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      resetEpoch();
+      gameLoop();
+    });
+  </script>
+</body>
+</html>

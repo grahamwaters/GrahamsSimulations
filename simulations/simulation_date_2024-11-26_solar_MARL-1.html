@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MARL Rogue Moons</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+        .score-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .score-box {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="score-container" id="scoreContainer"></div>
+<canvas id="solarSystem"></canvas>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const G = 0.0001; // Gravitational constant for the simulation scale
+    const rogueMoonSpeedFactor = 1.2; // Increase simulation speed
+    const epochDuration = 30000; // 30 seconds
+    const offScreenLimit = 10000; // 10 seconds off-screen
+
+    const scoreContainer = document.getElementById('scoreContainer');
+    const scores = [];
+    let particleClouds = [];
+    let rogueMoons = [];
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+            this.isRogueMoon = false;
+            this.thrustDuration = 0;
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+
+            // Draw thruster effect if thrust is active
+            if (this.isRogueMoon && this.thrustDuration > 0) {
+                ctx.beginPath();
+                const direction = Math.atan2(-this.velocity.y, -this.velocity.x);
+                const thrusterX = this.x + Math.cos(direction) * this.radius * 1.5;
+                const thrusterY = this.y + Math.sin(direction) * this.radius * 1.5;
+                ctx.arc(thrusterX, thrusterY, 2, 0, Math.PI * 2, false);
+                ctx.fillStyle = 'orange';
+                ctx.fill();
+                this.thrustDuration--;
+            }
+        }
+
+        update(planets, action = {dx: 0, dy: 0}) {
+            if (this.isRogueMoon) {
+                this.velocity.x += action.dx * rogueMoonSpeedFactor;
+                this.velocity.y += action.dy * rogueMoonSpeedFactor;
+                this.thrustDuration = 5;
+            }
+
+            planets.forEach(planet => {
+                if (planet !== this) {
+                    const dx = planet.x - this.x;
+                    const dy = planet.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < this.radius + planet.radius) {
+                        this.explode();
+                    }
+                    const force = G * (this.mass * planet.mass) / (dist * dist);
+                    const accel = force / this.mass;
+
+                    this.velocity.x += (dx / dist) * accel;
+                    this.velocity.y += (dy / dist) * accel;
+                }
+            });
+
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+        }
+
+        explode() {
+            particleClouds.push(new ParticleCloud(this.x, this.y, this.radius, this.color));
+            rogueMoons = rogueMoons.filter(moon => moon !== this);
+        }
+
+        isOffScreen() {
+            return (
+                this.x < -50 || this.x > canvas.width + 50 ||
+                this.y < -50 || this.y > canvas.height + 50
+            );
+        }
+    }
+
+    class ParticleCloud {
+        constructor(x, y, radius, color) {
+            this.x = x;
+            this.y = y;
+            this.particles = Array.from({ length: 20 }, () => ({
+                x: x + Math.random() * radius - radius / 2,
+                y: y + Math.random() * radius - radius / 2,
+                size: Math.random() * 3,
+                color,
+            }));
+        }
+
+        draw() {
+            this.particles.forEach(particle => {
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2, false);
+                ctx.fillStyle = particle.color;
+                ctx.fill();
+            });
+        }
+    }
+
+    const sun = new CelestialBody(canvas.width / 2, canvas.height / 2, 30, 100000, 'yellow', {x: 0, y: 0});
+    const planets = [sun];
+
+    function randomColor() {
+        return `hsl(${Math.random() * 360}, 100%, 50%)`;
+    }
+
+    function createPlanets(numPlanets) {
+        for (let i = 0; i < numPlanets; i++) {
+            const radius = Math.random() * (15 - 5) + 5;
+            const distance = Math.random() * (canvas.width / 4 - 50) + 50;
+            const angle = Math.random() * Math.PI * 2;
+            const x = sun.x + distance * Math.cos(angle);
+            const y = sun.y + distance * Math.sin(angle);
+            const mass = Math.random() * (50 - 10) + 10;
+            const color = randomColor();
+            const velocity = {
+                x: Math.sin(angle) * -Math.sqrt(G * sun.mass / distance),
+                y: Math.cos(angle) * Math.sqrt(G * sun.mass / distance)
+            };
+
+            planets.push(new CelestialBody(x, y, radius, mass, color, velocity));
+        }
+    }
+
+    function createRogueMoons(numMoons) {
+        rogueMoons = [];
+        for (let i = 0; i < numMoons; i++) {
+            const radius = 10;
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const mass = 50;
+            const color = 'white';
+            const velocity = {x: 0, y: 0};
+            const moon = new CelestialBody(x, y, radius, mass, color, velocity);
+            moon.isRogueMoon = true;
+            rogueMoons.push(moon);
+            scores[i] = scores[i] || 0;
+        }
+    }
+
+    function rogueMoonActions() {
+        return rogueMoons.map(() => ({
+            dx: (Math.random() - 0.5) * 0.02,
+            dy: (Math.random() - 0.5) * 0.02,
+        }));
+    }
+
+    function updateScores() {
+        rogueMoons.forEach((moon, index) => {
+            if (moon.isOffScreen()) {
+                scores[index] -= 5;
+                moon.explode();
+            }
+        });
+
+        scoreContainer.innerHTML = scores
+            .map((score, i) => `<div class="score-box">Moon ${i + 1}: ${score}</div>`)
+            .join('');
+    }
+
+    function generateSpaceJunk() {
+        spaceJunk.push(new CelestialBody(
+            Math.random() * canvas.width,
+            Math.random() * canvas.height,
+            Math.random() * 5 + 2,
+            Math.random() * 50 + 10,
+            'gray',
+            {x: (Math.random() - 0.5) * 0.2, y: (Math.random() - 0.5) * 0.2}
+        ));
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const actions = rogueMoonActions();
+        planets.forEach(planet => planet.update(planets));
+        rogueMoons.forEach((moon, index) => {
+            moon.update(planets, actions[index]);
+            scores[index]++;
+        });
+        particleClouds.forEach(cloud => cloud.update(planets)); //not working for some reason.
+        spaceJunk.forEach(junk => junk.update(planets)); // not working yet.
+        [...planets, ...rogueMoons, ...particleClouds].forEach(entity => entity.draw());
+        updateScores();
+
+    }
+
+    function startEpoch() {
+        createRogueMoons(3);
+        setTimeout(startEpoch, epochDuration);
+    }
+
+    createPlanets(5);
+    startEpoch();
+    setInterval(generateSpaceJunk, 1000); // Add space junk every second
+    animate();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        sun.x = canvas.width / 2;
+        sun.y = canvas.height / 2;
+    });
+</script>
+</body>
+</html>

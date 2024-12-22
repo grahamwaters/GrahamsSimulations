@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Planetary Physics Simulation with Q-Learning</title>
+    <style>
+      body,
+      html {
+        height: 100%;
+        margin: 0;
+        background: black;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+      }
+      #scoreboard {
+        display: flex;
+        justify-content: space-evenly;
+        align-items: center;
+        position: fixed;
+        top: 0;
+        width: 100%;
+        color: white;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 10px;
+        font-size: 18px;
+        z-index: 10;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="scoreboard">
+      <div id="agent1-score">Agent 1: 0</div>
+      <div id="agent2-score">Agent 2: 0</div>
+      <div id="agent3-score">Agent 3: 0</div>
+      <div id="epoch">Epoch: 1</div>
+    </div>
+    <canvas id="orbitCanvas"></canvas>
+    <script>
+      const canvas = document.getElementById("orbitCanvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const G = 0.01; // Gravitational constant
+      const sun = {
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        radius: 50,
+        mass: 1000,
+      };
+      let debris = [],
+        planets = [],
+        agents = [];
+      let currentEpoch = 1;
+
+      // Helper Functions
+      function randomInRange(min, max) {
+        return Math.random() * (max - min) + min;
+      }
+
+      function randomColor() {
+        return `hsl(${randomInRange(0, 360)}, 100%, 50%)`;
+      }
+
+      function drawCircle(x, y, radius, color) {
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.closePath();
+      }
+
+      // Q-Learning Logic
+      const ACTIONS = [
+        "thrust-up",
+        "thrust-down",
+        "thrust-left",
+        "thrust-right",
+        "drift",
+      ];
+      const LEARNING_RATE = 0.1,
+        DISCOUNT_FACTOR = 0.9,
+        EPSILON = 0.1;
+
+      function initializeQTable() {
+        return {};
+      }
+
+      function selectAction(qTable, state) {
+        if (Math.random() < EPSILON)
+          return ACTIONS[Math.floor(Math.random() * ACTIONS.length)];
+        if (!qTable[state]) qTable[state] = {};
+        return Object.keys(qTable[state]).reduce(
+          (best, action) =>
+            (qTable[state][action] || 0) > (qTable[state][best] || 0)
+              ? action
+              : best,
+          ACTIONS[0]
+        );
+      }
+
+      function updateQTable(qTable, state, action, reward, nextState) {
+        if (!qTable[state]) qTable[state] = {};
+        if (!qTable[nextState]) qTable[nextState] = {};
+        const currentQ = qTable[state][action] || 0;
+        const maxNextQ = Math.max(...Object.values(qTable[nextState]));
+        qTable[state][action] =
+          currentQ +
+          LEARNING_RATE * (reward + DISCOUNT_FACTOR * maxNextQ - currentQ);
+      }
+
+      function getCurrentState(agent, planets, sun) {
+        const state = [];
+        state.push(
+          Math.floor(Math.hypot(agent.x - sun.x, agent.y - sun.y) / 100)
+        );
+        planets.forEach((planet) => {
+          state.push(
+            Math.floor(Math.hypot(agent.x - planet.x, agent.y - planet.y) / 100)
+          );
+        });
+        return state.join("-");
+      }
+
+      function calculateReward(agent, planets) {
+        let reward = 0;
+
+        // Reward for proximity to planets
+        planets.forEach((planet) => {
+          const distance = Math.hypot(agent.x - planet.x, agent.y - planet.y);
+          if (distance < planet.radius * 5) reward += 20; // Reward for being near
+          if (distance < planet.radius * 2) reward -= 10; // Penalty for being too close
+        });
+
+        // Penalize for being too far from the system center
+        const distanceFromSun = Math.hypot(agent.x - sun.x, agent.y - sun.y);
+        if (distanceFromSun > canvas.width / 2) reward -= 50; // Heavy penalty for going out of frame
+
+        return reward;
+      }
+
+      function agentBehavior(agent, planets, sun) {
+        const state = getCurrentState(agent, planets, sun);
+        const action = selectAction(agent.qTable, state);
+
+        const thrust = 0.1;
+        switch (action) {
+          case "thrust-up":
+            agent.vy -= thrust;
+            break;
+          case "thrust-down":
+            agent.vy += thrust;
+            break;
+          case "thrust-left":
+            agent.vx -= thrust;
+            break;
+          case "thrust-right":
+            agent.vx += thrust;
+            break;
+          case "drift":
+            break;
+        }
+
+        const reward = calculateReward(agent, planets);
+        agent.score += reward;
+
+        const nextState = getCurrentState(agent, planets, sun);
+        updateQTable(agent.qTable, state, action, reward, nextState);
+
+        const agentIndex = agents.indexOf(agent);
+        document.getElementById(
+          `agent${agentIndex + 1}-score`
+        ).textContent = `Agent ${agentIndex + 1}: ${Math.floor(agent.score)}`;
+      }
+
+      // Physics
+      function gravitationalForce(body1, body2) {
+        const dx = body2.x - body1.x;
+        const dy = body2.y - body1.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance === 0) return { fx: 0, fy: 0 }; // Avoid division by zero
+        const force =
+          (G * (body1.mass * body2.mass)) / Math.max(distance * distance, 1);
+        const angle = Math.atan2(dy, dx);
+        return { fx: force * Math.cos(angle), fy: force * Math.sin(angle) };
+      }
+
+      function applyGravity() {
+        // Apply gravity to agents
+        agents.forEach((agent) => {
+          planets.forEach((planet) => {
+            const force = gravitationalForce(agent, planet);
+            agent.vx += force.fx / agent.mass;
+            agent.vy += force.fy / agent.mass;
+          });
+          const sunForce = gravitationalForce(agent, sun);
+          agent.vx += sunForce.fx / agent.mass;
+          agent.vy += sunForce.fy / agent.mass;
+        });
+
+        // Apply gravity to planets
+        planets.forEach((planet) => {
+          const sunForce = gravitationalForce(planet, sun);
+          planet.vx += sunForce.fx / planet.mass;
+          planet.vy += sunForce.fy / planet.mass;
+          planet.x += planet.vx;
+          planet.y += planet.vy;
+        });
+
+        // Apply gravity to debris
+        debris.forEach((particle) => {
+          const sunForce = gravitationalForce(particle, sun);
+          particle.vx += sunForce.fx / particle.mass;
+          particle.vy += sunForce.fy / particle.mass;
+          particle.x += particle.vx;
+          particle.y += particle.vy;
+        });
+      }
+
+      function enforceBoundaries(agent) {
+        if (agent.x < 0 || agent.x > canvas.width) agent.vx *= -1; // Reverse x velocity
+        if (agent.y < 0 || agent.y > canvas.height) agent.vy *= -1; // Reverse y velocity
+      }
+
+      function spawnPlanet() {
+        const angle = randomInRange(0, 2 * Math.PI);
+        const distance = randomInRange(200, 400);
+        return {
+          x: sun.x + distance * Math.cos(angle),
+          y: sun.y + distance * Math.sin(angle),
+          vx: -Math.sin(angle) * Math.sqrt((G * sun.mass) / distance),
+          vy: Math.cos(angle) * Math.sqrt((G * sun.mass) / distance),
+          radius: randomInRange(10, 20),
+          mass: 10,
+          color: randomColor(),
+        };
+      }
+
+      function spawnAgent() {
+        const distance = randomInRange(150, 300);
+        const angle = randomInRange(0, 2 * Math.PI);
+        return {
+          x: sun.x + distance * Math.cos(angle),
+          y: sun.y + distance * Math.sin(angle),
+          vx: randomInRange(-0.5, 0.5), // Small random velocity
+          vy: randomInRange(-0.5, 0.5),
+          radius: 10,
+          mass: 1,
+          qTable: initializeQTable(),
+          score: 0,
+        };
+      }
+
+      // Collision Handling
+      function checkCollisions() {
+        agents.forEach((agent, index) => {
+          // Agent-Sun collision
+          if (
+            Math.hypot(agent.x - sun.x, agent.y - sun.y) <
+            agent.radius + sun.radius
+          ) {
+            handleAgentSunCollision(agent, index);
+          }
+
+          // Agent-Planet collision
+          planets.forEach((planet) => {
+            if (
+              Math.hypot(agent.x - planet.x, agent.y - planet.y) <
+              agent.radius + planet.radius
+            ) {
+              handleAgentPlanetCollision(agent, index);
+            }
+          });
+        });
+      }
+
+      // Debris Logic
+      function spawnDebris(x, y, vx, vy, radius) {
+        for (let i = 0; i < radius / 2; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = Math.random();
+          debris.push({
+            x: x + Math.cos(angle) * radius,
+            y: y + Math.sin(angle) * radius,
+            vx: vx + speed * Math.cos(angle),
+            vy: vy + speed * Math.sin(angle),
+            radius: Math.random() * 2,
+            mass: 0.1, // Small mass for debris
+            life: 100, // Frames before disappearing
+          });
+        }
+      }
+
+      function updateDebris() {
+        debris = debris.filter((particle) => {
+          particle.x += particle.vx;
+          particle.y += particle.vy;
+          particle.life--;
+          return particle.life > 0; // Remove debris when its life expires
+        });
+      }
+
+      function drawEnvironment() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw the sun
+        drawCircle(sun.x, sun.y, sun.radius, "yellow");
+
+        // Draw planets
+        planets.forEach((planet) =>
+          drawCircle(planet.x, planet.y, planet.radius, planet.color)
+        );
+
+        // Draw agents
+        agents.forEach((agent) => {
+          if (agent) {
+            drawCircle(agent.x, agent.y, agent.radius, "white");
+          }
+        });
+
+        // Draw debris
+        debris.forEach((particle) =>
+          drawCircle(particle.x, particle.y, particle.radius, "red")
+        );
+      }
+
+      function spawnPlanet() {
+        const semiMajorAxis = randomInRange(200, 400);
+        const semiMinorAxis = randomInRange(150, 300);
+        const angle = randomInRange(0, Math.PI * 2);
+        const speed = Math.sqrt((G * sun.mass) / semiMajorAxis);
+        return {
+          x: sun.x + semiMajorAxis * Math.cos(angle),
+          y: sun.y + semiMinorAxis * Math.sin(angle),
+          vx: -speed * Math.sin(angle),
+          vy: speed * Math.cos(angle),
+          radius: randomInRange(10, 20),
+          color: randomColor(),
+          mass: 10,
+        };
+      }
+      function handleAgentSunCollision(agent, index) {
+        spawnDebris(agent.x, agent.y, agent.vx, agent.vy, agent.radius);
+        agents.splice(index, 1); // Remove the agent cleanly
+      }
+
+      function handleAgentPlanetCollision(agent, index) {
+        spawnDebris(agent.x, agent.y, agent.vx, agent.vy, agent.radius);
+        agents.splice(index, 1); // Remove the agent cleanly
+      }
+
+      function spawnAgent() {
+        const distance = randomInRange(150, 300);
+        const angle = randomInRange(0, 2 * Math.PI);
+        return {
+          x: sun.x + distance * Math.cos(angle),
+          y: sun.y + distance * Math.sin(angle),
+          vx: 0,
+          vy: 0,
+          radius: 10,
+          qTable: {}, // Initialize Q-table
+          mass: 1,
+          score: 0,
+        };
+      }
+      let epochTimer = 10 * 1000; // 30 seconds per epoch
+
+      function handleEpochTimeout() {
+        resetEpoch(); // Reset the epoch when the timer expires
+        setTimeout(handleEpochTimeout, epochTimer); // Restart the timer
+      }
+
+      function resetEpoch() {
+        currentEpoch++;
+        document.getElementById("epoch").textContent = `Epoch: ${currentEpoch}`;
+
+        agents = agents.map((agent) => ({
+          ...spawnAgent(),
+          qTable: agent.qTable, // Preserve the existing Q-table
+        }));
+
+        // Reset scores
+        agents.forEach((agent, index) => {
+          document.getElementById(
+            `agent${index + 1}-score`
+          ).textContent = `Agent ${index + 1}: 0`;
+        });
+      }
+
+      function dampVelocity(agent) {
+        const dampingFactor = 0.99; // Slightly reduce velocity every frame
+        agent.vx *= dampingFactor;
+        agent.vy *= dampingFactor;
+      }
+
+      agents.forEach((agent) => {
+        dampVelocity(agent);
+      });
+
+      agents.forEach((agent) => {
+        enforceBoundaries(agent);
+      });
+      // Do not reset epoch here; handle it based on conditions in checkCollisions
+      requestAnimationFrame(gameLoop); // Recursively call the game loop
+
+      function gameLoop() {
+        applyGravity(); // Update gravitational effects on all entities
+        checkCollisions(); // Handle collisions and spawn debris
+        updateDebris(); // Update debris positions and remove expired particles
+        drawEnvironment(); // Render the environment
+
+        // Update agents' behavior using Q-learning
+        agents.forEach((agent) => {
+          if (agent) {
+            agentBehavior(agent, planets, sun); // Determine actions and update Q-tables
+            agent.x += agent.vx; // Update position based on velocity
+            agent.y += agent.vy;
+          }
+        });
+
+        requestAnimationFrame(gameLoop); // Recursively call the loop
+      }
+
+      // Start Simulation
+      function startSimulation() {
+        planets = Array.from({ length: 4 }, spawnPlanet); // Initialize planets
+        resetEpoch(); // Initialize agents
+        setTimeout(handleEpochTimeout, epochTimer); // Start epoch timer
+        gameLoop(); // Start the game loop
+      }
+
+      // Start the simulation
+      startSimulation();
+    </script>
+  </body>
+</html>

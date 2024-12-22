@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Fractional Parts Interactive</title>
+<style>
+    :root {
+        --bg-gradient: linear-gradient(135deg, #2F4F4F, #001f3f 60%);
+        --shape-bg: #708090; /* slate grey */
+        --highlight-color: #e85d04;
+        --line-color: #ffffff;
+        --button-bg: #394B59; /* a navy/slate */
+        --button-hover-bg: #2C3E50;
+        --text-color: #fff;
+        --transition: 0.3s ease;
+    }
+
+    body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+        background: var(--bg-gradient);
+        color: var(--text-color);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    .container {
+        position: relative;
+        width: 600px;
+        height: 600px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        border: 2px solid rgba(255,255,255,0.3);
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        border-radius: 20px;
+        background: rgba(0,0,0,0.2);
+        backdrop-filter: blur(10px);
+    }
+
+    /* Central shape */
+    .shape-container {
+        width: 250px;
+        height: 250px;
+        position: relative;
+        z-index: 1;
+        background: var(--shape-bg);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        transition: transform var(--transition), clip-path var(--transition), border-radius var(--transition);
+        border: 3px solid var(--line-color);
+    }
+
+    /* We'll manipulate the shape via clip-path or border-radius in JS */
+
+    /* Fraction overlay (using pseudo-element and conic-gradient) */
+    .shape-container::before {
+        content: "";
+        position: absolute;
+        top:0; left:0; right:0; bottom:0;
+        border-radius: inherit;
+        clip-path: inherit;
+        z-index: -1;
+        background: var(--shape-bg);
+    }
+
+    /* Buttons styling */
+    .buttons-wrapper {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    .button {
+        position: absolute;
+        background: var(--button-bg);
+        border: 2px solid var(--line-color);
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        color: var(--text-color);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        cursor: pointer;
+        pointer-events: auto;
+        transition: background var(--transition);
+    }
+
+    .button:hover {
+        background: var(--button-hover-bg);
+    }
+
+    /* Position number buttons around the shape (2 to 8) */
+    /* We'll position them roughly in a circular manner */
+    .btn-2 { top: 20%; left: 50%; transform: translateX(-50%); }
+    .btn-3 { top: 20%; right: 20%; }
+    .btn-4 { right: 20%; top: 50%; transform: translateY(-50%); }
+    .btn-5 { bottom: 20%; right: 20%; }
+    .btn-6 { bottom: 20%; left: 50%; transform: translateX(-50%); }
+    .btn-7 { bottom: 20%; left: 20%; }
+    .btn-8 { left: 20%; top: 50%; transform: translateY(-50%); }
+
+    /* Shape selection buttons around the corners */
+    /* We'll place them diagonally outside the fraction buttons */
+    .shape-circle {
+        top: 5%; left: 5%;
+    }
+    .shape-square {
+        top: 5%; right: 5%;
+    }
+    .shape-star {
+        bottom: 5%; left: 5%;
+    }
+
+    /* Let's give distinct text labels */
+    .shape-circle::after {
+        content: "O";
+        font-size: 1.2rem;
+    }
+    .shape-square::after {
+        content: "□";
+        font-size: 1.2rem;
+    }
+    .shape-star::after {
+        content: "★";
+        font-size: 1.2rem;
+    }
+
+    /* A subtle instruction */
+    .instructions {
+        position: absolute;
+        bottom: 5%;
+        right: 5%;
+        font-size: 0.9rem;
+        background: rgba(0,0,0,0.3);
+        padding: 0.5rem 1rem;
+        border-radius: 5px;
+        border: 1px solid rgba(255,255,255,0.2);
+        text-align: right;
+        line-height: 1.4;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="shape-container" id="shape"></div>
+    <div class="buttons-wrapper">
+        <!-- Number buttons -->
+        <div class="button btn-2" data-fraction="2">2</div>
+        <div class="button btn-3" data-fraction="3">3</div>
+        <div class="button btn-4" data-fraction="4">4</div>
+        <div class="button btn-5" data-fraction="5">5</div>
+        <div class="button btn-6" data-fraction="6">6</div>
+        <div class="button btn-7" data-fraction="7">7</div>
+        <div class="button btn-8" data-fraction="8">8</div>
+
+        <!-- Shape buttons -->
+        <div class="button shape-circle" data-shape="circle"></div>
+        <div class="button shape-square" data-shape="square"></div>
+        <div class="button shape-star" data-shape="star"></div>
+
+        <div class="instructions">
+            <strong>Instructions:</strong><br>
+            Choose a shape (top-left, top-right, bottom-left corners)<br>
+            Choose a number (around the shape) to divide it into fractional parts.
+        </div>
+    </div>
+</div>
+
+<script>
+    const shapeEl = document.getElementById('shape');
+    let currentShape = 'circle';
+    let currentFraction = 2;
+
+    // Define shapes using CSS properties:
+    // circle: border-radius: 50%
+    // square: no border-radius, normal square
+    // star: use a clip-path polygon for star
+    const shapes = {
+        circle: {
+            borderRadius: '50%',
+            clipPath: 'none'
+        },
+        square: {
+            borderRadius: '0%',
+            clipPath: 'none'
+        },
+        star: {
+            borderRadius: '0%',
+            // A star shape clip-path:
+            clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
+        }
+    };
+
+    // Function to update the shape visually
+    function updateShape() {
+        const shapeInfo = shapes[currentShape];
+        shapeEl.style.borderRadius = shapeInfo.borderRadius;
+        shapeEl.style.clipPath = shapeInfo.clipPath;
+        updateFraction();
+    }
+
+    // Function to update fraction (divide shape)
+    // We'll use a conic-gradient to show equal slices.
+    // For now, we create alternating slices: one highlighted and others in a slightly different tone.
+    function updateFraction() {
+        // Create a conic-gradient with `currentFraction` slices
+        // We'll alternate between two colors: var(--shape-bg) and a slightly darker or lighter shade
+        const fraction = currentFraction;
+        let sliceAngle = 360 / fraction;
+
+        // Let's highlight one slice in highlight-color, and the rest in shape-bg:
+        // We'll do something like: highlight-color from 0deg to sliceAngle deg,
+        // then shape-bg for the rest, equally spaced.
+        // But let's show all slices separated by thin white lines.
+
+        // Construct gradient stops:
+        let gradientStops = [];
+        for (let i=0; i<fraction; i++) {
+            let startAngle = i * sliceAngle;
+            let endAngle = (i+1)* sliceAngle;
+            // We'll put a small gap for the line color:
+            let lineOffset = 0.5; // a fraction of a degree for a white line
+            // Every slice: highlight just the first slice differently?
+            // Let's highlight all slices the same but alternate colors to show division.
+            // We'll alternate between two shades: highlight-color and shape-bg for clarity.
+            let color = (i % 2 === 0) ? 'var(--shape-bg)' : 'var(--highlight-color)';
+            gradientStops.push(`${color} ${startAngle}deg ${endAngle - lineOffset}deg`);
+            // Add a line color slice
+            gradientStops.push(`var(--line-color) ${endAngle - lineOffset}deg ${endAngle}deg`);
+        }
+
+        let gradientString = `conic-gradient(${gradientStops.join(', ')})`;
+        shapeEl.style.background = gradientString;
+    }
+
+    // Event listeners for shape buttons
+    document.querySelectorAll('[data-shape]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentShape = btn.getAttribute('data-shape');
+            updateShape();
+        });
+    });
+
+    // Event listeners for fraction buttons
+    document.querySelectorAll('[data-fraction]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentFraction = parseInt(btn.getAttribute('data-fraction'));
+            updateFraction();
+        });
+    });
+
+    // Initialize
+    updateShape();
+</script>
+</body>
+</html>

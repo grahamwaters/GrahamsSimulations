@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: black;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="simulationCanvas"></canvas>
+    <script>
+        // JavaScript code
+
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        class CelestialBody {
+            constructor(name, mass, radius, position, velocity, color) {
+                this.name = name;
+                this.mass = mass;
+                this.radius = radius;
+                this.position = { x: position.x, y: position.y };
+                this.velocity = { x: velocity.x, y: velocity.y };
+                this.color = color;
+                this.force = { x: 0, y: 0 };
+                this.trail = [];
+            }
+        }
+
+        class Spaceship {
+            constructor(position, velocity, color) {
+                this.position = { x: position.x, y: position.y };
+                this.velocity = { x: velocity.x, y: velocity.y };
+                this.color = color;
+                this.force = { x: 0, y: 0 };
+            }
+
+            applyAutonomousNavigation(targets) {
+                const target = targets[0];
+                const dx = target.position.x - this.position.x;
+                const dy = target.position.y - this.position.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const forceMag = 1e20 / distance;
+                this.force.x += (forceMag * dx) / distance;
+                this.force.y += (forceMag * dy) / distance;
+            }
+        }
+
+        const sun = new CelestialBody("Sun", 1.989e30, 50, { x: canvas.width / 2, y: canvas.height / 2 }, { x: 0, y: 0 }, "yellow");
+        const planets = [
+            new CelestialBody("Planet1", 5.972e24, 10, { x: canvas.width / 2 + 200, y: canvas.height / 2 }, { x: 0, y: 1.5 }, "blue"),
+            new CelestialBody("Planet2", 4.867e24, 12, { x: canvas.width / 2 + 300, y: canvas.height / 2 }, { x: 0, y: 1.2 }, "green"),
+            new CelestialBody("Planet3", 6.418e23, 8, { x: canvas.width / 2 + 400, y: canvas.height / 2 }, { x: 0, y: 1 }, "red")
+        ];
+        const asteroids = [
+            new CelestialBody("Asteroid1", 1e18, 5, { x: canvas.width / 2 - 150, y: canvas.height / 2 - 150 }, { x: 1, y: -1 }, "gray"),
+            new CelestialBody("Asteroid2", 1e18, 5, { x: canvas.width / 2 - 100, y: canvas.height / 2 + 200 }, { x: -1.5, y: 1 }, "gray"),
+            new CelestialBody("Asteroid3", 1e18, 5, { x: canvas.width / 2 + 250, y: canvas.height / 2 - 100 }, { x: -1, y: 1.5 }, "gray"),
+            new CelestialBody("Asteroid4", 1e18, 5, { x: canvas.width / 2 + 300, y: canvas.height / 2 + 300 }, { x: 0.5, y: -0.8 }, "gray"),
+            new CelestialBody("Asteroid5", 1e18, 5, { x: canvas.width / 2 - 200, y: canvas.height / 2 + 150 }, { x: -0.8, y: 0.6 }, "gray")
+        ];
+        const spaceship = new Spaceship({ x: canvas.width / 2 - 300, y: canvas.height / 2 - 300 }, { x: 1, y: 1 }, "white");
+
+        function computeForces(bodies, G = 6.67430e-11) {
+            bodies.forEach(body => (body.force = { x: 0, y: 0 }));
+            for (let i = 0; i < bodies.length; i++) {
+                for (let j = i + 1; j < bodies.length; j++) {
+                    const dx = bodies[j].position.x - bodies[i].position.x;
+                    const dy = bodies[j].position.y - bodies[i].position.y;
+                    const distanceSq = dx * dx + dy * dy;
+                    const distance = Math.sqrt(distanceSq);
+                    const force = (G * bodies[i].mass * bodies[j].mass) / distanceSq;
+                    const fx = (force * dx) / distance;
+                    const fy = (force * dy) / distance;
+                    bodies[i].force.x += fx;
+                    bodies[i].force.y += fy;
+                    bodies[j].force.x -= fx;
+                    bodies[j].force.y -= fy;
+                }
+            }
+        }
+
+        function updateBodies(bodies, dt) {
+            bodies.forEach(body => {
+                const ax = body.force.x / body.mass;
+                const ay = body.force.y / body.mass;
+                body.velocity.x += ax * dt;
+                body.velocity.y += ay * dt;
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                body.trail.push({ x: body.position.x, y: body.position.y });
+                if (body.trail.length > 100) body.trail.shift();
+            });
+        }
+
+        function render(ctx, bodies, spaceship) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            bodies.forEach(body => {
+                ctx.beginPath();
+                body.trail.forEach((point, index) => {
+                    if (index === 0) ctx.moveTo(point.x, point.y);
+                    else ctx.lineTo(point.x, point.y);
+                });
+                ctx.strokeStyle = body.color;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(body.position.x, body.position.y, body.radius, 0, 2 * Math.PI);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+            });
+            ctx.beginPath();
+            ctx.arc(spaceship.position.x, spaceship.position.y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = spaceship.color;
+            ctx.fill();
+        }
+
+        function simulationStep() {
+            const allBodies = [sun, ...planets, ...asteroids];
+            computeForces(allBodies);
+            spaceship.applyAutonomousNavigation(planets);
+            updateBodies(allBodies, 1);
+            updateBodies([spaceship], 1);
+            render(ctx, allBodies, spaceship);
+            requestAnimationFrame(simulationStep);
+        }
+
+        simulationStep();
+    </script>
+</body>
+</html>

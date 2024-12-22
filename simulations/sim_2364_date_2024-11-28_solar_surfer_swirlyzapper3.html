@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rogue Moons Cleaning Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+        #ui {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #ui button, #ui input {
+            color: white;
+            background: none;
+            border: 1px solid gray;
+            padding: 5px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+<canvas id="solarSystem"></canvas>
+<div id="ui">
+    <button onclick="toggleMusic()">Toggle Music</button>
+    <label>Gravitational Constant<input type="range" min="0.00001" max="0.001" step="0.00001" value="0.0001" onchange="updateGravitationalConstant(this.value)"></label>
+</div>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const context = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let gravitationalConstant = 0.0001; // Gravitational constant
+    const laserRange = 200; // Range of the laser from the rogue moon
+    const laserWidth = 3; // Width of the laser for visual representation
+    const agentSpeed = 0.9; // Speed of the cleaning agents
+    const particleCloudGenerationInterval = 50; // Interval (in frames) for generating new particle clouds
+
+    let particleClouds = [];
+    let rogueMoons = [];
+    let agents = [];
+    let framesSinceLastCloudGeneration = 0;
+    let targetedParticles = new Map();
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+            this.isRogueMoon = false;
+        }
+
+        draw() {
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            context.fillStyle = this.color;
+            context.fill();
+        }
+
+        update() {
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+
+            if (this.x < this.radius || this.x > canvas.width - this.radius) {
+                this.velocity.x = -this.velocity.x;
+            }
+            if (this.y < this.radius || this.y > canvas.height - this.radius) {
+                this.velocity.y = -this.velocity.y;
+            }
+
+            if (this.isRogueMoon) {
+                this.zapParticles();
+            }
+        }
+
+        zapParticles() {
+            particleClouds = particleClouds.filter(cloud => {
+                cloud.particles = cloud.particles.filter(particle => {
+                    const deltaX = this.x - particle.x;
+                    const deltaY = this.y - particle.y;
+                    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                    if (distance <= laserRange) {
+                        context.beginPath();
+                        context.moveTo(this.x, this.y);
+                        context.lineTo(particle.x, particle.y);
+                        context.strokeStyle = 'red';
+                        context.lineWidth = laserWidth;
+                        context.stroke();
+                        return false;
+                    }
+                    return true;
+                });
+                return cloud.particles.length > 0;
+            });
+        }
+    }
+
+    class ParticleCloud {
+        constructor(x, y, radius, color) {
+            this.particles = Array.from({ length: 20 }, () => ({
+                x: x + Math.random() * radius * 2 - radius,
+                y: y + Math.random() * radius * 2 - radius,
+                size: Math.random() * 2 + 1,
+                color: color
+            }));
+        }
+
+        draw() {
+            this.particles.forEach(particle => {
+                context.beginPath();
+                context.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                context.fillStyle = particle.color;
+                context.fill();
+            });
+        }
+    }
+
+    class Agent {
+        constructor(x, y, radius, color) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.color = color;
+            this.targetParticle = null;
+        }
+
+        draw() {
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            context.fillStyle = this.color;
+            context.fill();
+        }
+
+        update() {
+            if (this.targetParticle && targetedParticles.get(this.targetParticle) !== this) {
+                targetedParticles.delete(this.targetParticle);
+                this.targetParticle = null;
+            }
+
+            if (!this.targetParticle) {
+                let nearestCloud = null;
+                let nearestDistance = Infinity;
+                particleClouds.forEach(cloud => {
+                    cloud.particles.forEach(particle => {
+                        if (!targetedParticles.has(particle)) {
+                            const deltaX = particle.x - this.x;
+                            const deltaY = particle.y - this.y;
+                            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                            if (distance < nearestDistance) {
+                                nearestCloud = cloud;
+                                this.targetParticle = particle;
+                                nearestDistance = distance;
+                            }
+                        }
+                    });
+                });
+
+                if (this.targetParticle) {
+                    targetedParticles.set(this.targetParticle, this);
+                }
+            }
+
+            if (this.targetParticle) {
+                const deltaX = this.targetParticle.x - this.x;
+                const deltaY = this.targetParticle.y - this.y;
+                const angle = Math.atan2(deltaY, deltaX);
+                this.x += Math.cos(angle) * agentSpeed;
+                this.y += Math.sin(angle) * agentSpeed;
+            }
+
+            this.x = Math.max(this.radius, Math.min(this.x, canvas.width - this.radius));
+            this.y = Math.max(this.radius, Math.min(this.y, canvas.height - this.radius));
+        }
+    }
+
+    function initializeSimulation() {
+        for (let i = 0; i < 8; i++) {
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const radius = 5;
+            const mass = 20;
+            const color = 'cyan';
+            const velocity = { x: (Math.random() - 0.5) * 0.8, y: (Math.random() - 0.5) * 0.8 };
+            const moon = new CelestialBody(x, y, radius, mass, color, velocity);
+            moon.isRogueMoon = true;
+            rogueMoons.push(moon);
+        }
+
+        for (let i = 0; i < 8; i++) {
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const radius = 2;
+            const color = 'red';
+            agents.push(new Agent(x, y, radius, color));
+        }
+
+        for (let i = 0; i < 5; i++) {
+            createParticleCloud();
+        }
+    }
+
+    function createParticleCloud() {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const radius = 50;
+        const color = 'white';
+        particleClouds.push(new ParticleCloud(x, y, radius, color));
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        framesSinceLastCloudGeneration++;
+        if (framesSinceLastCloudGeneration >= particleCloudGenerationInterval && particleClouds.length < 10) {
+            createParticleCloud();
+            framesSinceLastCloudGeneration = 0;
+        }
+
+        rogueMoons.forEach(moon => moon.update());
+        agents.forEach(agent => agent.update());
+        particleClouds.forEach(cloud => cloud.draw());
+        rogueMoons.forEach(moon => moon.draw());
+        agents.forEach(agent => agent.draw());
+    }
+
+    initializeSimulation();
+    animate();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+</script>
+<audio autoplay loop>
+    <source src="HolinzaCCO - 20 Minute Meditation.mp3" type="audio/mpeg">
+    Your browser does not support the audio tag.
+</audio>
+</body>
+</html>

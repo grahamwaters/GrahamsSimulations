@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<!-- saved from url=(0067)file:///Users/watersterminal/Downloads/solar_surfer/zap_fields.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Space Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<canvas id="solarSystem" width="3413" height="1757"></canvas>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const context = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const gravitationalConstant = 0.0001; // Gravitational constant
+    const collisionDistance = 20; // Distance for collision detection
+    let planets = [];
+    let rogueMoons = [];
+    let lastPlanetTime = Date.now();
+    let planetInterval = 5000; // Time interval (in milliseconds) to add new planets
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+            this.isRogueMoon = false;
+        }
+
+        draw() {
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            context.fillStyle = this.color;
+            context.fill();
+        }
+
+        update() {
+            // Gravity from central body
+            const deltaX = canvas.width / 2 - this.x;
+            const deltaY = canvas.height / 2 - this.y;
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            const force = gravitationalConstant * (this.mass * 10000) / (distance * distance);
+            const acceleration = force / this.mass;
+            this.velocity.x += (deltaX / distance) * acceleration;
+            this.velocity.y += (deltaY / distance) * acceleration;
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+        }
+
+        checkCollisions() {
+            for (let i = 0; i < planets.length; i++) {
+                const planet = planets[i];
+                if (planet === this) continue; // Skip self
+                const deltaX = this.x - planet.x;
+                const deltaY = this.y - planet.y;
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                if (distance < this.radius + planet.radius) {
+                    this.createFragments(planet, i);
+                    // If this (RogueMoon) is destroyed in the collision, return
+                    if (planets.indexOf(this) === -1) return;
+                }
+            }
+        }
+
+        createFragments(planet, index) {
+            const numberOfFragments = 5;
+            const fragmentSize = planet.radius / 3;
+            for (let i = 0; i < numberOfFragments; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const velocity = {
+                    x: Math.cos(angle) * (Math.random() * 0.5 + 0.2),
+                    y: Math.sin(angle) * (Math.random() * 0.5 + 0.2)
+                };
+                const mass = planet.mass / numberOfFragments;
+                const fragment = new CelestialBody(planet.x, planet.y, fragmentSize, mass, 'grey', velocity);
+                planets.push(fragment);
+            }
+            planets.splice(index, 1); // Remove the original planet
+        }
+    }
+
+    class RogueMoon extends CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            super(x, y, radius, mass, color, velocity);
+            this.isRogueMoon = true;
+        }
+
+        update() {
+            let target = null;
+            let minimumDistance = Infinity;
+            planets.forEach(planet => {
+                const deltaX = this.x - planet.x;
+                const deltaY = this.y - planet.y;
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                if (distance < minimumDistance) {
+                    minimumDistance = distance;
+                    target = planet;
+                }
+            });
+
+            if (target) {
+                // Chase the target
+                const deltaX = target.x - this.x;
+                const deltaY = target.y - this.y;
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                this.velocity.x += 0.05 * (deltaX / distance);
+                this.velocity.y += 0.05 * (deltaY / distance);
+            }
+
+            super.update();
+            this.checkCollisions();
+        }
+    }
+
+    function initializeSimulation() {
+        // Central massive body (sun)
+        const sun = new CelestialBody(canvas.width / 2, canvas.height / 2, 25, 10000, 'red', {x: 0, y: 0});
+        planets.push(sun);
+
+        // Initialize rogue moons
+        for (let i = 0; i < 3; i++) {
+            const moon = new RogueMoon(
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                10,
+                20,
+                'white',
+                {x: (Math.random() - 0.5) * 0.4, y: (Math.random() - 0.5) * 0.4}
+            );
+            rogueMoons.push(moon);
+        }
+    }
+
+    function addRandomPlanet() {
+        const x = Math.random() * canvas.width;
+        const y = 0; // Start from the top for visibility
+        const radius = 10 + Math.random() * 10; // Radius between 10 and 20
+        const mass = radius * 2; // Mass proportional to radius
+        const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        const velocity = {x: (Math.random() - 0.5) * 0.1, y: Math.random() * 0.1 + 0.1}; // Random downward movement
+        const planet = new CelestialBody(x, y, radius, mass, color, velocity);
+        planets.push(planet);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (Date.now() - lastPlanetTime > planetInterval) {
+            addRandomPlanet();
+            lastPlanetTime = Date.now();
+        }
+
+        rogueMoons.forEach(moon => {
+            moon.update();
+            moon.draw();
+        });
+
+        planets.forEach(planet => {
+            planet.update();
+            planet.draw();
+        });
+    }
+
+    initializeSimulation();
+    animate();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+</script>
+
+
+</body></html>
