@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MARL Rogue Moons with Roche Limits</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+        .score-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .score-box {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="score-container" id="scoreContainer"></div>
+<canvas id="solarSystem"></canvas>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const G = 0.0001; // Gravitational constant
+    const rogueMoonSpeedFactor = 1.5; // Speed multiplier
+    const rocheLimitMultiplier = 5.44; // Empirical Roche constant for rigid bodies
+    const epochDuration = 10000; // 30 seconds per epoch
+    const offScreenLimit = 10000; // 10 seconds off-screen
+
+    const scoreContainer = document.getElementById('scoreContainer');
+    const scores = [];
+    let particleClouds = [];
+    let rogueMoons = [];
+    let spaceJunk = [];
+    let planets = [];
+    let smallMoon;
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+            this.isRogueMoon = false;
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+        }
+
+        update(planets) {
+            planets.forEach(planet => {
+                if (planet !== this) {
+                    const dx = planet.x - this.x;
+                    const dy = planet.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    // Check for Roche limit
+                    const rocheLimit = rocheLimitMultiplier * planet.radius * Math.pow((planet.mass / this.mass), 1/3);
+                    if (dist < rocheLimit) {
+                        this.explode();
+                    }
+
+                    // Gravitational force
+                    const force = G * (this.mass * planet.mass) / (dist * dist);
+                    const accel = force / this.mass;
+
+                    this.velocity.x += (dx / dist) * accel;
+                    this.velocity.y += (dy / dist) * accel;
+                }
+            });
+
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+        }
+
+        explode() {
+            particleClouds.push(new ParticleCloud(this.x, this.y, this.radius, this.color, this.velocity));
+            if (this.isRogueMoon) {
+                rogueMoons = rogueMoons.filter(moon => moon !== this);
+            } else if (spaceJunk.includes(this)) {
+                spaceJunk = spaceJunk.filter(junk => junk !== this);
+            }
+        }
+    }
+
+    class ParticleCloud {
+        /**
+         * Creates a new ParticleCloud instance.
+         *
+         * @param {number} x - The initial x-coordinate of the particle cloud.
+         * @param {number} y - The initial y-coordinate of the particle cloud.
+         * @param {number} radius - The radius of the particle cloud.
+         * @param {string} color - The color of the particles in the cloud.
+         * @param {object} velocity - An object containing the initial velocity of the cloud
+         *                           with properties `x` and `y`.
+         */
+        constructor(x, y, radius, color, velocity) {
+            this.originX = x; // Store the original x-coordinate
+            this.originY = y; // Store the original y-coordinate
+            this.particles = Array.from({ length: 1 }, () => ({
+                x: x + Math.random() * radius - radius / 2, // Initialize x-coordinate within the radius
+                y: y + Math.random() * radius - radius / 2, // Initialize y-coordinate within the radius
+                vx: velocity.x + (Math.random() - 0.5) * 0.1, // Initialize x-velocity with slight variation
+                vy: velocity.y + (Math.random() - 0.5) * 0.1, // Initialize y-velocity with slight variation
+                size: Math.random() * 1 + 1, // Random particle size between 1 and 2
+                color, // Assign the given color
+                mass: Math.random() * 0.01 + 0.01 // Random mass between 0.01 and 0.02
+            }));
+        }
+
+        /**
+         * Updates the position and velocity of each particle in the cloud
+         * based on the gravitational forces from the planets.
+         *
+         * @param {array} planets - An array of planet objects.
+         */
+        update(planets) {
+            this.particles.forEach(particle => {
+                planets.forEach(planet => {
+                    const dx = planet.x - particle.x; // Calculate the x-distance between planet and particle
+                    const dy = planet.y - particle.y; // Calculate the y-distance between planet and particle
+                    const dist = Math.sqrt(dx * dx + dy * dy); // Calculate the distance between planet and particle
+
+                    const force = G * (particle.mass * planet.mass) / (dist * dist); // Calculate gravitational force
+                    const accel = force / particle.mass; // Calculate acceleration due to gravity
+
+                    particle.vx += (dx / dist) * accel; // Update particle's x-velocity based on acceleration
+                    particle.vy += (dy / dist) * accel; // Update particle's y-velocity based on acceleration
+                });
+
+                particle.x += particle.vx; // Update particle's x-position based on velocity
+                particle.y += particle.vy; // Update particle's y-position based on velocity
+            });
+        }
+
+        /**
+         * Draws each particle in the cloud on the canvas.
+         */
+        draw() {
+            this.particles.forEach(particle => {
+                ctx.beginPath(); // Begin drawing path
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2, false); // Draw a circle for the particle
+                ctx.fillStyle = particle.color; // Set fill color
+                ctx.fill(); // Fill the circle
+            });
+        }
+    }
+
+    function createSun() {
+        planets.push(new CelestialBody(canvas.width / 2, canvas.height / 2, 50, 100000, 'yellow', {x: 0, y: 0}));
+    }
+
+    function createPlanets(numPlanets) {
+        for (let i = 0; i < numPlanets; i++) {
+            const radius = Math.random() * (15 - 5) + 5;
+            const semiMajorAxis = Math.random() * (canvas.width / 4 - 50) + 50;
+            const semiMinorAxis = semiMajorAxis * (Math.random() * 0.5 + 0.5);
+            const angle = Math.random() * Math.PI * 2;
+            const x = canvas.width / 2 + semiMajorAxis * Math.cos(angle);
+            const y = canvas.height / 2 + semiMinorAxis * Math.sin(angle);
+            const mass = Math.random() * (50 - 10) + 10;
+            const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            const velocity = {
+                x: Math.sin(angle) * -Math.sqrt(G * 100000 / semiMajorAxis),
+                y: Math.cos(angle) * Math.sqrt(G * 100000 / semiMajorAxis)
+            };
+
+            planets.push(new CelestialBody(x, y, radius, mass, color, velocity));
+        }
+    }
+
+    function createRogueMoons(numMoons) {
+        rogueMoons = [];
+        for (let i = 0; i < numMoons; i++) {
+            const radius = 10;
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const mass = 50;
+            const color = 'white';
+            const velocity = {
+                x: (Math.random() - 0.5) * 0.2,
+                y: (Math.random() - 0.5) * 0.2
+            };
+            const moon = new CelestialBody(x, y, radius, mass, color, velocity);
+            moon.isRogueMoon = true;
+            rogueMoons.push(moon);
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        planets.forEach(planet => planet.update(planets));
+        rogueMoons.forEach(moon => moon.update(planets));
+        particleClouds.forEach(cloud => cloud.update(planets)); // should only show when collision happens. particles should also only live 30 seconds unless there is a finite number of them.
+        spaceJunk.forEach(junk => junk.update(planets));
+
+        [...planets, ...rogueMoons, ...particleClouds, ...spaceJunk].forEach(entity => entity.draw());
+    }
+
+    createSun();
+    createPlanets(2);
+    createRogueMoons(4);
+    animate();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+</script>
+</body>
+</html>

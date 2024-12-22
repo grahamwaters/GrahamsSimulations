@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>RL-Controlled Binary Star Satellite Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+            background-color: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #hud, #sidebar {
+            position: absolute;
+            top: 10px;
+            color: #fff;
+            font-family: 'Lucida Console', Courier, monospace;
+            z-index: 10;
+        }
+
+        #hud {
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            width: 300px;
+            border: 1px solid #444;
+        }
+
+        #sidebar {
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            width: 250px;
+            border: 1px solid #444;
+        }
+
+        #sidebar h2 {
+            margin-top: 0;
+            color: #0ff;
+            font-size: 16px;
+            text-shadow: 0 0 5px #0ff;
+        }
+
+        #sidebar label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        #sidebar input {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        #sidebar button {
+            background: #222;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 5px;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        #sidebar button:hover {
+            background: #333;
+        }
+
+        #hud h1 {
+            font-size: 18px;
+            margin: 0 0 5px;
+            color: #0ff;
+        }
+
+        #hud .info-line {
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        #hud .info-line span {
+            color: #0f0;
+        }
+    </style>
+</head>
+<body>
+<div id="sidebar">
+    <h2>Mission Parameters</h2>
+    <label>Star Mass (each): <input type="number" id="starMass" value="5e13" step="1e12"></label>
+    <label>Star Distance: <input type="number" id="starDistance" value="300" step="10"></label>
+    <label>Star Orbital Velocity: <input type="number" id="starVelocity" value="50" step="5"></label>
+    <label>Satellite Initial X: <input type="number" id="satX" value="0"></label>
+    <label>Satellite Initial Y: <input type="number" id="satY" value="-500"></label>
+    <label>Satellite Initial VX: <input type="number" id="satVX" value="50"></label>
+    <label>Satellite Initial VY: <input type="number" id="satVY" value="0"></label>
+    <label>Enable Debris After 30 Episodes: <input type="checkbox" id="enableDebris" checked></label>
+    <button id="applyParams">Apply & Reset</button>
+</div>
+
+<div id="hud">
+    <h1>Satellite HUD</h1>
+    <div class="info-line">Episode: <span id="episode">0</span></div>
+    <div class="info-line">Total Reward (this ep): <span id="reward">0</span></div>
+    <div class="info-line">Forces on Sat: <span id="forces">Fx=0,Fy=0</span></div>
+    <div class="info-line">Sat Pos: <span id="satpos">x=0,y=0</span></div>
+    <div class="info-line">Sat Vel: <span id="satvel">vx=0,vy=0</span></div>
+    <div class="info-line">Radar (Debris): <span id="radar">None</span></div>
+</div>
+
+<!-- Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Cannon.js -->
+<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+<!-- TensorFlow.js -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+
+<script>
+    ////////////////////////////////////////////////////////////////////////
+    // Global Variables
+    ////////////////////////////////////////////////////////////////////////
+    let scene, camera, renderer;
+    let world;
+    let star1, star2, satellite;
+    let debrisList = [];
+    let policy;
+    let episode = 0;
+    let totalReward = 0;
+    let stepCount = 0;
+    let episodeStates = [];
+    let episodeActions = [];
+    let episodeRewards = [];
+    let MAX_EPISODES = 1000;
+    let training = true;
+    let enableDebrisParam = true;
+
+    // UI Elements
+    const episodeElem = document.getElementById('episode');
+    const rewardElem = document.getElementById('reward');
+    const forcesElem = document.getElementById('forces');
+    const satPosElem = document.getElementById('satpos');
+    const satVelElem = document.getElementById('satvel');
+    const radarElem = document.getElementById('radar');
+
+    // Parameters from UI
+    let starMassValue = parseFloat(document.getElementById('starMass').value);
+    let starDistanceValue = parseFloat(document.getElementById('starDistance').value);
+    let starVelocityValue = parseFloat(document.getElementById('starVelocity').value);
+    let satXValue = parseFloat(document.getElementById('satX').value);
+    let satYValue = parseFloat(document.getElementById('satY').value);
+    let satVXValue = parseFloat(document.getElementById('satVX').value);
+    let satVYValue = parseFloat(document.getElementById('satVY').value);
+
+    document.getElementById('applyParams').addEventListener('click', () => {
+        starMassValue = parseFloat(document.getElementById('starMass').value);
+        starDistanceValue = parseFloat(document.getElementById('starDistance').value);
+        starVelocityValue = parseFloat(document.getElementById('starVelocity').value);
+        satXValue = parseFloat(document.getElementById('satX').value);
+        satYValue = parseFloat(document.getElementById('satY').value);
+        satVXValue = parseFloat(document.getElementById('satVX').value);
+        satVYValue = parseFloat(document.getElementById('satVY').value);
+        enableDebrisParam = document.getElementById('enableDebris').checked;
+        resetSimulation();
+    });
+
+    ////////////////////////////////////////////////////////////////////////
+    // Constants & Scales
+    ////////////////////////////////////////////////////////////////////////
+    const G = 6.67430e-11; // Realistic G (but we scale masses/distances)
+    const SCALE = 1e-2; // Scale down distances for visualization
+    const TIME_STEP = 1/60; // Physics step
+    const ACTIONS = ['none','up','down','left','right'];
+
+    // Debris spawn parameters
+    const DEBRIS_SPAWN_INTERVAL = 500; // steps
+    let debrisLastSpawn = 0;
+
+    ////////////////////////////////////////////////////////////////////////
+    // Initialization
+    ////////////////////////////////////////////////////////////////////////
+    function initThree() {
+        scene = new THREE.Scene();
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1e7);
+        camera.position.set(0, 0, 2000);
+
+        renderer = new THREE.WebGLRenderer({antialias:true});
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff,1,0);
+        scene.add(pointLight);
+
+        // Background stars
+        // Just a simple starfield
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 2000;
+        const starPositions = new Float32Array(starCount*3);
+        for (let i=0; i<starCount*3; i++) {
+            starPositions[i] = (Math.random()*2-1)*5000;
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions,3));
+        const starMaterial = new THREE.PointsMaterial({color:0xffffff, size:2});
+        const starField = new THREE.Points(starGeometry, starMaterial);
+        scene.add(starField);
+    }
+
+    function initCannon() {
+        world = new CANNON.World();
+        world.gravity.set(0,0,0);
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+    }
+
+    function createStar(position, velocity, mass, color) {
+        const sphereGeom = new THREE.SphereGeometry(20,32,32);
+        const sphereMat = new THREE.MeshBasicMaterial({color: color});
+        const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+        mesh.position.copy(position);
+        scene.add(mesh);
+
+        const body = new CANNON.Body({
+            mass: mass,
+            position: new CANNON.Vec3(position.x, position.y, 0),
+            velocity: new CANNON.Vec3(velocity.x, velocity.y, 0),
+            shape: new CANNON.Sphere(20)
+        });
+        body.type = CANNON.Body.DYNAMIC; // We'll handle gravity manually
+        world.addBody(body);
+
+        return {mesh, body};
+    }
+
+    function createSatellite(position, velocity) {
+        const geom = new THREE.ConeGeometry(5,15,32);
+        const mat = new THREE.MeshStandardMaterial({color:0xffffff});
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.rotation.x = Math.PI/2;
+        mesh.position.copy(position);
+        scene.add(mesh);
+
+        const body = new CANNON.Body({
+            mass: 10,
+            position: new CANNON.Vec3(position.x, position.y, 0),
+            velocity: new CANNON.Vec3(velocity.x, velocity.y, 0),
+            shape: new CANNON.Cylinder(5,5,15,16),
+        });
+        world.addBody(body);
+
+        // Thruster line
+        const thrusterGeom = new THREE.BufferGeometry();
+        const thrusterVerts = new Float32Array([0,-5,0, 0,-15,0]);
+        thrusterGeom.setAttribute('position', new THREE.BufferAttribute(thrusterVerts,3));
+        const thrusterMat = new THREE.LineBasicMaterial({color:0xff4500});
+        const thruster = new THREE.Line(thrusterGeom, thrusterMat);
+        thruster.visible = false;
+        mesh.add(thruster);
+
+        return {mesh, body, thruster};
+    }
+
+    function createDebris(position, velocity) {
+        const geom = new THREE.SphereGeometry(3,16,16);
+        const mat = new THREE.MeshStandardMaterial({color:0xaaaaaa});
+        const mesh = new THREE.Mesh(geom,mat);
+        mesh.position.copy(position);
+        scene.add(mesh);
+
+        const body = new CANNON.Body({
+            mass: 1,
+            position: new CANNON.Vec3(position.x, position.y,0),
+            velocity: new CANNON.Vec3(velocity.x, velocity.y,0),
+            shape: new CANNON.Sphere(3),
+        });
+        world.addBody(body);
+        return {mesh, body};
+    }
+
+    function initObjects() {
+        const pos1 = new THREE.Vector3(-starDistanceValue,0,0);
+        const pos2 = new THREE.Vector3(starDistanceValue,0,0);
+        const vel1 = new THREE.Vector3(0, starVelocityValue,0);
+        const vel2 = new THREE.Vector3(0, -starVelocityValue,0);
+
+        star1 = createStar(pos1, vel1, starMassValue, 0xffa500);
+        star2 = createStar(pos2, vel2, starMassValue, 0x1e90ff);
+
+        const satPos = new THREE.Vector3(satXValue, satYValue,0);
+        const satVel = new THREE.Vector3(satVXValue, satVYValue,0);
+        satellite = createSatellite(satPos, satVel);
+    }
+
+    class PolicyNetwork {
+        constructor() {
+            this.model = this.createModel();
+            this.optimizer = tf.train.adam(0.001);
+        }
+        createModel() {
+            const model = tf.sequential();
+            // State size: x,y,vx,vy,dx1,dy1,dx2,dy2,debris info...
+            // We'll include a fixed-size radar: let's say we track up to 5 debris items: each with dx, dy
+            // That adds 10 inputs. Total so far: 8 for stars+sat, plus 10 for debris=18 inputs.
+            // We'll track up to 5 debris objects. If fewer, we pad with zeros.
+            model.add(tf.layers.dense({inputShape: [18], units: 32, activation:'relu'}));
+            model.add(tf.layers.dense({units:32, activation:'relu'}));
+            model.add(tf.layers.dense({units:ACTIONS.length, activation:'softmax'}));
+            return model;
+        }
+
+        predict(state) {
+            const input = tf.tensor2d([state]);
+            const prediction = this.model.predict(input);
+            const probs = prediction.dataSync();
+            tf.dispose([input, prediction]);
+            return probs;
+        }
+
+        async train(states, actions, rewards) {
+            const discounted = this.discountRewards(rewards);
+            const mean = discounted.reduce((a,b)=>a+b,0)/discounted.length;
+            const std = Math.sqrt(discounted.map(r=> (r-mean)**2).reduce((a,b)=>a+b,0)/discounted.length);
+            const norm = discounted.map(r=>(r-mean)/(std+1e-8));
+
+            const actionIndices = actions.map(a => ACTIONS.indexOf(a));
+            const oneHotActions = tf.oneHot(tf.tensor1d(actionIndices, 'int32'), ACTIONS.length);
+            const stateTensor = tf.tensor2d(states);
+            const rewardTensor = tf.tensor1d(norm);
+
+            await this.optimizer.minimize(() => {
+                const logits = this.model.predict(stateTensor);
+                const loss = tf.losses.softmaxCrossEntropy(oneHotActions, logits).mul(rewardTensor);
+                return loss.mean();
+            });
+
+            tf.dispose([oneHotActions, stateTensor, rewardTensor]);
+        }
+
+        discountRewards(rewards, gamma=0.99) {
+            let sum = 0;
+            const discounted = [];
+            for (let i=rewards.length-1; i>=0; i--) {
+                sum = rewards[i] + gamma*sum;
+                discounted[i] = sum;
+            }
+            return discounted;
+        }
+    }
+
+    function initAgent() {
+        policy = new PolicyNetwork();
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // State & Reward
+    ////////////////////////////////////////////////////////////////////////
+    function distance(a, b) {
+        return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);
+    }
+
+    function getRadarState() {
+        // Return positions of up to 5 debris relative to satellite
+        // If fewer than 5, pad with zeros
+        const satPos = satellite.body.position;
+        let radarData = [];
+        let sortedDebris = debrisList.slice().sort((d1,d2)=>{
+            const dist1 = d1.body.position.vsub(satPos).norm();
+            const dist2 = d2.body.position.vsub(satPos).norm();
+            return dist1-dist2;
+        });
+        sortedDebris = sortedDebris.slice(0,5);
+        for (let d of sortedDebris) {
+            const dx = (d.body.position.x - satPos.x)/1000;
+            const dy = (d.body.position.y - satPos.y)/1000;
+            radarData.push(dx,dy);
+        }
+        // Pad if less than 5
+        while (radarData.length<10) {
+            radarData.push(0,0);
+        }
+        return radarData;
+    }
+
+    function getState() {
+        // State: [sat.x/1000, sat.y/1000, sat.vx/100, sat.vy/100,
+        //          rel1x/1000, rel1y/1000, rel2x/1000, rel2y/1000,
+        //          debris data (10 floats)]
+        const satPos = satellite.body.position;
+        const satVel = satellite.body.velocity;
+        const rel1 = star1.body.position.vsub(satPos);
+        const rel2 = star2.body.position.vsub(satPos);
+
+        const radarData = getRadarState();
+
+        return [
+            satPos.x/1000,
+            satPos.y/1000,
+            satVel.x/100,
+            satVel.y/100,
+            rel1.x/1000,
+            rel1.y/1000,
+            rel2.x/1000,
+            rel2.y/1000,
+            ...radarData
+        ];
+    }
+
+    function getReward() {
+        // Reward:
+        // - Heavy negative if too close to a star or debris (collision)
+        // - Encouragement for maintaining target distance ~ 500 units from both stars
+        // - Negative if collided with debris
+        const satPos = satellite.body.position;
+        const dist1 = star1.body.position.vsub(satPos).norm();
+        const dist2 = star2.body.position.vsub(satPos).norm();
+
+        // Check collisions:
+        // Simple collision check: if distance < 30 from star center => collision
+        if (dist1<30 || dist2<30) return -100;
+
+        // Debris avoidance:
+        // If any debris is too close (<30), big penalty
+        for (let d of debrisList) {
+            const dd = d.body.position.vsub(satPos).norm();
+            if (dd<30) {
+                return -100;
+            }
+        }
+
+        const targetDistance = 500;
+        const avgDist = (dist1+dist2)/2;
+        let r = -Math.abs(targetDistance - avgDist)*0.01; // scaling factor
+        // Encourage staying alive:
+        r += 0.1; // small reward each step surviving
+
+        return r;
+    }
+
+    function sampleAction(probs) {
+        const rand = Math.random();
+        let cum = 0;
+        for (let i=0; i<probs.length; i++) {
+            cum += probs[i];
+            if (rand<cum) return i;
+        }
+        return probs.length-1;
+    }
+
+    async function selectAction(state) {
+        const probs = policy.predict(state);
+        const actionIndex = sampleAction(probs);
+        return ACTIONS[actionIndex];
+    }
+
+    function applyAction(action) {
+        const forceMagnitude = 500;
+        const f = new CANNON.Vec3(0,0,0);
+        switch(action) {
+            case 'up': f.y += forceMagnitude; break;
+            case 'down': f.y -= forceMagnitude; break;
+            case 'left': f.x -= forceMagnitude; break;
+            case 'right': f.x += forceMagnitude; break;
+        }
+        satellite.body.applyForce(f, satellite.body.position);
+
+        // Show thruster if action != none
+        satellite.thruster.visible = (action!=='none');
+        if (action!=='none') {
+            setTimeout(()=>{satellite.thruster.visible = false;},100);
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Debris Management
+    ////////////////////////////////////////////////////////////////////////
+    function maybeSpawnDebris() {
+        if (!enableDebrisParam || episode<30) return;
+        if (stepCount - debrisLastSpawn > DEBRIS_SPAWN_INTERVAL) {
+            debrisLastSpawn = stepCount;
+            // Spawn debris at random position far away and moving inward
+            const angle = Math.random()*Math.PI*2;
+            const dist = 2000 + Math.random()*500;
+            const dx = Math.cos(angle)*dist;
+            const dy = Math.sin(angle)*dist;
+            const vx = -dx/100;
+            const vy = -dy/100;
+
+            const d = createDebris(new THREE.Vector3(dx,dy,0), new THREE.Vector3(vx,vy,0));
+            debrisList.push(d);
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Episode Handling & Reset
+    ////////////////////////////////////////////////////////////////////////
+    async function endEpisode() {
+        training = true;
+        await policy.train(episodeStates, episodeActions, episodeRewards);
+        console.log(`Episode ${episode+1} completed. Total Reward: ${totalReward.toFixed(2)}`);
+        episode++;
+        resetSimulation();
+    }
+
+    function resetSimulation() {
+        // Remove all objects except stars and satellite
+        // Actually remove everything and re-init:
+        for (let obj of debrisList) {
+            scene.remove(obj.mesh);
+            world.removeBody(obj.body);
+        }
+        debrisList = [];
+
+        world.clearForces();
+        world.bodies.splice(0,world.bodies.length);
+        while(scene.children.length>0) {
+            scene.remove(scene.children[0]);
+        }
+
+        initThree();
+        initCannon();
+        initObjects();
+
+        // Clear episode data
+        episodeStates = [];
+        episodeActions = [];
+        episodeRewards = [];
+        totalReward = 0;
+        stepCount = 0;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Force Calculation
+    ////////////////////////////////////////////////////////////////////////
+    function applyGravitationalForces() {
+        // Compute forces between stars and satellite
+        // F = G*m1*m2 / r^2 along direction of line connecting them
+        const bodies = [star1.body, star2.body, satellite.body, ...debrisList.map(d=>d.body)];
+
+        for (let b of bodies) {
+            b.force.set(0,0,0); // reset forces
+        }
+
+        // Apply gravity between every pair except debris-debris (optional)
+        const allBodies = [star1.body, star2.body, satellite.body, ...debrisList.map(d=>d.body)];
+        for (let i=0; i<allBodies.length; i++) {
+            for (let j=i+1; j<allBodies.length; j++) {
+                const b1 = allBodies[i], b2 = allBodies[j];
+                const dx = b2.position.x-b1.position.x;
+                const dy = b2.position.y-b1.position.y;
+                const r2 = dx*dx+dy*dy;
+                const r = Math.sqrt(r2);
+                if (r>1e-6) {
+                    const f = G * (b1.mass*b2.mass) / r2;
+                    const fx = f*(dx/r);
+                    const fy = f*(dy/r);
+                    b1.force.x += fx; b1.force.y += fy;
+                    b2.force.x -= fx; b2.force.y -= fy;
+                }
+            }
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Radar & HUD Updates
+    ////////////////////////////////////////////////////////////////////////
+    function updateHUD() {
+        episodeElem.textContent = episode;
+        rewardElem.textContent = totalReward.toFixed(2);
+
+        const satPos = satellite.body.position;
+        const satVel = satellite.body.velocity;
+        satPosElem.textContent = `x=${satPos.x.toFixed(1)},y=${satPos.y.toFixed(1)}`;
+        satVelElem.textContent = `vx=${satVel.x.toFixed(1)},vy=${satVel.y.toFixed(1)}`;
+
+        // Compute total forces on satellite:
+        const Fx = satellite.body.force.x;
+        const Fy = satellite.body.force.y;
+        forcesElem.textContent = `Fx=${Fx.toFixed(1)},Fy=${Fy.toFixed(1)}`;
+
+        // Radar:
+        if (debrisList.length>0 && episode>=30 && enableDebrisParam) {
+            let radarText = "";
+            const satP = satellite.body.position;
+            const sorted = debrisList.slice().sort((a,b)=>{
+                const da = a.body.position.vsub(satP).norm();
+                const db = b.body.position.vsub(satP).norm();
+                return da-db;
+            });
+            for (let i=0; i<Math.min(3,sorted.length); i++) {
+                const dist = sorted[i].body.position.vsub(satP).norm().toFixed(1);
+                radarText += `D${i+1}:${dist} `;
+            }
+            radarElem.textContent = radarText;
+        } else {
+            radarElem.textContent = 'None';
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Main Loop
+    ////////////////////////////////////////////////////////////////////////
+    async function animate() {
+        requestAnimationFrame(animate);
+
+        applyGravitationalForces();
+        world.step(TIME_STEP);
+
+        // Update positions
+        star1.mesh.position.copy(star1.body.position);
+        star2.mesh.position.copy(star2.body.position);
+        satellite.mesh.position.copy(satellite.body.position);
+        satellite.mesh.quaternion.copy(satellite.body.quaternion);
+
+        for (let d of debrisList) {
+            d.mesh.position.copy(d.body.position);
+            d.mesh.quaternion.copy(d.body.quaternion);
+        }
+
+        // RL step
+        const state = getState();
+        episodeStates.push(state);
+        const action = await selectAction(state);
+        episodeActions.push(action);
+        applyAction(action);
+
+        const reward = getReward();
+        episodeRewards.push(reward);
+        totalReward += reward;
+
+        stepCount++;
+
+        // Maybe spawn debris
+        maybeSpawnDebris();
+
+        // Episode termination criteria:
+        if (stepCount>2000 || reward<=-100) {
+            endEpisode();
+        }
+
+        updateHUD();
+        renderer.render(scene, camera);
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Start Everything
+    ////////////////////////////////////////////////////////////////////////
+    initThree();
+    initCannon();
+    initObjects();
+    initAgent();
+    animate();
+</script>
+</body>
+</html>

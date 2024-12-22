@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Advanced Stick Figure Walker Simulation</title>
+    <!-- Responsive Meta Tag -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- External Libraries via CDN -->
+    <!-- dat.GUI for parameter controls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <!-- Three.js for 3D rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Cannon.js for physics simulation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon/0.6.2/cannon.min.js"></script>
+    <!-- TensorFlow.js for machine learning -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+
+    <!-- Inline CSS for Styling -->
+    <style>
+        /* Reset default margins and set background */
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+        }
+
+        /* Container to hold simulation and controls */
+        #container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Simulation Canvas */
+        #simulation {
+            flex: 1;
+            position: relative;
+        }
+
+        /* Controls Sidebar */
+        #controls {
+            width: 300px;
+            background-color: #1e1e1e;
+            padding: 20px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        /* Controls Header */
+        #controls h2 {
+            margin-top: 0;
+            color: #00ffea;
+            font-size: 1.5em;
+        }
+
+        /* Container for dat.GUI */
+        #gui-container {
+            margin-top: 20px;
+        }
+
+        /* Force Application Button */
+        #apply-force {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #00ffea;
+            border: none;
+            color: #1e1e1e;
+            cursor: pointer;
+            font-size: 1em;
+        }
+    </style>
+</head>
+<body>
+    <!-- Main Container -->
+    <div id="container">
+        <!-- Simulation Area -->
+        <div id="simulation"></div>
+
+        <!-- Controls Sidebar -->
+        <div id="controls">
+            <h2>Simulation Parameters</h2>
+            <div id="gui-container"></div>
+            <button id="apply-force">Apply External Force</button>
+        </div>
+    </div>
+
+    <!-- Inline JavaScript for Functionality -->
+    <script>
+        // ==========================
+        // Three.js Setup
+        // ==========================
+        const scene = new THREE.Scene();
+
+        // Initial Background Color (will be updated based on planet)
+        scene.background = new THREE.Color(0x000000);
+
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            (window.innerWidth - 300) / window.innerHeight,
+            0.1,
+            1000
+        );
+        camera.position.set(0, 5, 10);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth - 300, window.innerHeight); // Adjust for controls sidebar
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('simulation').appendChild(renderer.domElement);
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth - 300;
+            const height = window.innerHeight;
+            renderer.setSize(width, height);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+        });
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight.position.set(10, 10, 5);
+        scene.add(directionalLight);
+
+        // ==========================
+        // Cannon.js Physics Setup
+        // ==========================
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0); // Default gravity
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+
+        // Ground Physics Body
+        const groundMaterial = new CANNON.Material("groundMaterial");
+        const groundBody = new CANNON.Body({
+            mass: 0,
+            material: groundMaterial,
+            shape: new CANNON.Plane(),
+            position: new CANNON.Vec3(0, 0, 0)
+        });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        // Ground Visual
+        const groundTexture = new THREE.TextureLoader().load('https://i.imgur.com/3R0G0sM.jpg'); // Placeholder texture
+        groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+        groundTexture.repeat.set(10, 10);
+        const groundGeometry = new THREE.PlaneGeometry(50, 50);
+        const groundMesh = new THREE.Mesh(
+            groundGeometry,
+            new THREE.MeshStandardMaterial({ map: groundTexture })
+        );
+        groundMesh.rotation.x = -Math.PI / 2;
+        scene.add(groundMesh);
+
+        // ==========================
+        // Background Plane Setup
+        // ==========================
+        // Create a large plane behind the scene to act as the background
+        const backgroundGeometry = new THREE.PlaneGeometry(100, 100);
+        const backgroundMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const backgroundMesh = new THREE.Mesh(backgroundGeometry, backgroundMaterial);
+        backgroundMesh.position.set(0, 25, -50);
+        scene.add(backgroundMesh);
+
+        // ==========================
+        // Stick Figure Setup
+        // ==========================
+        const stickFigure = new THREE.Group();
+
+        // Torso
+        const torsoGeometry = new THREE.BoxGeometry(0.5, 1, 0.2);
+        const torsoMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+        const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
+        torso.position.y = 1;
+        stickFigure.add(torso);
+
+        // Head
+        const headGeometry = new THREE.SphereGeometry(0.3, 32, 32);
+        const head = new THREE.Mesh(headGeometry, torsoMaterial);
+        head.position.y = 1.75;
+        stickFigure.add(head);
+
+        // Left Thigh
+        const leftThighGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const leftThigh = new THREE.Mesh(leftThighGeometry, torsoMaterial);
+        leftThigh.position.set(-0.15, 0.5, 0);
+        stickFigure.add(leftThigh);
+
+        // Left Shin
+        const leftShinGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const leftShin = new THREE.Mesh(leftShinGeometry, torsoMaterial);
+        leftShin.position.set(-0.15, -0.3, 0);
+        stickFigure.add(leftShin);
+
+        // Right Thigh
+        const rightThighGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const rightThigh = new THREE.Mesh(rightThighGeometry, torsoMaterial);
+        rightThigh.position.set(0.15, 0.5, 0);
+        stickFigure.add(rightThigh);
+
+        // Right Shin
+        const rightShinGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+        const rightShin = new THREE.Mesh(rightShinGeometry, torsoMaterial);
+        rightShin.position.set(0.15, -0.3, 0);
+        stickFigure.add(rightShin);
+
+        scene.add(stickFigure);
+
+        // Stick Figure Physics Bodies
+        const stickBodies = [];
+        const stickBodyMaterials = new CANNON.Material("stickMaterial");
+
+        // Torso Body
+        const torsoBody = new CANNON.Body({
+            mass: 1,
+            position: new CANNON.Vec3(0, 5, 0), // Start higher to drop
+            shape: new CANNON.Box(new CANNON.Vec3(0.25, 0.5, 0.1)),
+            material: stickBodyMaterials
+        });
+        world.addBody(torsoBody);
+        stickBodies.push(torsoBody);
+
+        // Head Body
+        const headBody = new CANNON.Body({
+            mass: 0.5,
+            position: new CANNON.Vec3(0, 6, 0),
+            shape: new CANNON.Sphere(0.3),
+            material: stickBodyMaterials
+        });
+        world.addBody(headBody);
+        stickBodies.push(headBody);
+
+        // Left Thigh Body
+        const leftThighBody = new CANNON.Body({
+            mass: 0.5,
+            position: new CANNON.Vec3(-0.15, 4.7, 0),
+            shape: new CANNON.Box(new CANNON.Vec3(0.1, 0.3, 0.1)),
+            material: stickBodyMaterials
+        });
+        world.addBody(leftThighBody);
+        stickBodies.push(leftThighBody);
+
+        // Left Shin Body
+        const leftShinBody = new CANNON.Body({
+            mass: 0.3,
+            position: new CANNON.Vec3(-0.15, 4.0, 0),
+            shape: new CANNON.Box(new CANNON.Vec3(0.1, 0.3, 0.1)),
+            material: stickBodyMaterials
+        });
+        world.addBody(leftShinBody);
+        stickBodies.push(leftShinBody);
+
+        // Right Thigh Body
+        const rightThighBody = new CANNON.Body({
+            mass: 0.5,
+            position: new CANNON.Vec3(0.15, 4.7, 0),
+            shape: new CANNON.Box(new CANNON.Vec3(0.1, 0.3, 0.1)),
+            material: stickBodyMaterials
+        });
+        world.addBody(rightThighBody);
+        stickBodies.push(rightThighBody);
+
+        // Right Shin Body
+        const rightShinBody = new CANNON.Body({
+            mass: 0.3,
+            position: new CANNON.Vec3(0.15, 4.0, 0),
+            shape: new CANNON.Box(new CANNON.Vec3(0.1, 0.3, 0.1)),
+            material: stickBodyMaterials
+        });
+        world.addBody(rightShinBody);
+        stickBodies.push(rightShinBody);
+
+        // Constraints (Joints)
+        const constraints = [];
+
+        // Head to Torso
+        const headConstraint = new CANNON.LockConstraint(torsoBody, headBody);
+        world.addConstraint(headConstraint);
+        constraints.push(headConstraint);
+
+        // Torso to Left Thigh
+        const leftHip = new CANNON.HingeConstraint(torsoBody, leftThighBody, {
+            pivotA: new CANNON.Vec3(-0.15, -0.5, 0),
+            axisA: new CANNON.Vec3(1, 0, 0),
+            pivotB: new CANNON.Vec3(0, 0.3, 0),
+            axisB: new CANNON.Vec3(1, 0, 0)
+        });
+        world.addConstraint(leftHip);
+        constraints.push(leftHip);
+
+        // Left Thigh to Left Shin
+        const leftKnee = new CANNON.HingeConstraint(leftThighBody, leftShinBody, {
+            pivotA: new CANNON.Vec3(0, -0.3, 0),
+            axisA: new CANNON.Vec3(1, 0, 0),
+            pivotB: new CANNON.Vec3(0, 0.3, 0),
+            axisB: new CANNON.Vec3(1, 0, 0)
+        });
+        world.addConstraint(leftKnee);
+        constraints.push(leftKnee);
+
+        // Torso to Right Thigh
+        const rightHip = new CANNON.HingeConstraint(torsoBody, rightThighBody, {
+            pivotA: new CANNON.Vec3(0.15, -0.5, 0),
+            axisA: new CANNON.Vec3(1, 0, 0),
+            pivotB: new CANNON.Vec3(0, 0.3, 0),
+            axisB: new CANNON.Vec3(1, 0, 0)
+        });
+        world.addConstraint(rightHip);
+        constraints.push(rightHip);
+
+        // Right Thigh to Right Shin
+        const rightKnee = new CANNON.HingeConstraint(rightThighBody, rightShinBody, {
+            pivotA: new CANNON.Vec3(0, -0.3, 0),
+            axisA: new CANNON.Vec3(1, 0, 0),
+            pivotB: new CANNON.Vec3(0, 0.3, 0),
+            axisB: new CANNON.Vec3(1, 0, 0)
+        });
+        world.addConstraint(rightKnee);
+        constraints.push(rightKnee);
+
+        // ==========================
+        // TensorFlow.js Machine Learning Setup
+        // ==========================
+        let model;
+        async function createModel() {
+            model = tf.sequential();
+            model.add(tf.layers.dense({ inputShape: [12], units: 32, activation: 'relu' }));
+            model.add(tf.layers.dense({ units: 24, activation: 'relu' }));
+            model.add(tf.layers.dense({ units: 8, activation: 'linear' })); // Actions: Torso and Thigh joints
+            model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
+        }
+
+        createModel();
+
+        // ==========================
+        // dat.GUI Controls Setup
+        // ==========================
+        const gui = new dat.GUI({ autoPlace: false });
+        document.getElementById('gui-container').appendChild(gui.domElement);
+
+        const params = {
+            gravity: -9.82,
+            planet: 'Earth',
+            speed: 1,
+            learn: true,
+            reset: () => resetSimulation(),
+            toggleAI: true
+        };
+
+        const planetOptions = ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Neptune'];
+
+        const planetGravity = {
+            'Mercury': -3.7,
+            'Venus': -8.87,
+            'Earth': -9.82,
+            'Mars': -3.71,
+            'Jupiter': -24.79,
+            'Saturn': -10.44,
+            'Neptune': -11.15
+        };
+
+        const planetColors = {
+            'Mercury': 0xaaaaaa,
+            'Venus': 0xffcc66,
+            'Earth': 0x1e90ff,
+            'Mars': 0xff4500,
+            'Jupiter': 0xffa500,
+            'Saturn': 0xffd700,
+            'Neptune': 0x1e90ff
+        };
+
+        // Planet Selection Dropdown
+        gui.add(params, 'planet', planetOptions)
+            .name('Planet')
+            .onChange((value) => {
+                params.gravity = planetGravity[value];
+                world.gravity.set(0, params.gravity, 0);
+                // Update background color
+                backgroundMesh.material.color.setHex(planetColors[value]);
+                // Update ground texture based on planet
+                updateGroundTexture(value);
+            });
+
+        // Simulation Speed Slider
+        gui.add(params, 'speed', 0.1, 5)
+            .name('Simulation Speed');
+
+        // Enable/Disable Learning Checkbox
+        gui.add(params, 'learn')
+            .name('Enable Learning');
+
+        // AI Toggle Checkbox
+        gui.add(params, 'toggleAI')
+            .name('Enable AI Control');
+
+        // Reset Button
+        gui.add(params, 'reset')
+            .name('Reset Simulation');
+
+        // Initialize with default planet color
+        backgroundMesh.material.color.setHex(planetColors[params.planet]);
+
+        // ==========================
+        // Ground Texture Update Function
+        // ==========================
+        function updateGroundTexture(planet) {
+            const planetTextures = {
+                'Mercury': 'https://i.imgur.com/3R0G0sM.jpg', // Placeholder texture URLs
+                'Venus': 'https://i.imgur.com/3R0G0sM.jpg',
+                'Earth': 'https://i.imgur.com/3R0G0sM.jpg',
+                'Mars': 'https://i.imgur.com/3R0G0sM.jpg',
+                'Jupiter': 'https://i.imgur.com/3R0G0sM.jpg',
+                'Saturn': 'https://i.imgur.com/3R0G0sM.jpg',
+                'Neptune': 'https://i.imgur.com/3R0G0sM.jpg'
+            };
+            const textureURL = planetTextures[planet] || 'https://i.imgur.com/3R0G0sM.jpg';
+            const newTexture = new THREE.TextureLoader().load(textureURL);
+            newTexture.wrapS = newTexture.wrapT = THREE.RepeatWrapping;
+            newTexture.repeat.set(10, 10);
+            groundMesh.material.map = newTexture;
+            groundMesh.material.needsUpdate = true;
+        }
+
+        // ==========================
+        // Simulation Reset Function
+        // ==========================
+        function resetSimulation() {
+            // Reset positions and velocities
+            torsoBody.position.set(0, 5, 0);
+            torsoBody.velocity.set(0, 0, 0);
+            torsoBody.angularVelocity.set(0, 0, 0);
+            torsoBody.quaternion.set(0, 0, 0, 1);
+
+            headBody.position.set(0, 6, 0);
+            headBody.velocity.set(0, 0, 0);
+            headBody.angularVelocity.set(0, 0, 0);
+            headBody.quaternion.set(0, 0, 0, 1);
+
+            leftThighBody.position.set(-0.15, 4.7, 0);
+            leftThighBody.velocity.set(0, 0, 0);
+            leftThighBody.angularVelocity.set(0, 0, 0);
+            leftThighBody.quaternion.set(0, 0, 0, 1);
+
+            leftShinBody.position.set(-0.15, 4.0, 0);
+            leftShinBody.velocity.set(0, 0, 0);
+            leftShinBody.angularVelocity.set(0, 0, 0);
+            leftShinBody.quaternion.set(0, 0, 0, 1);
+
+            rightThighBody.position.set(0.15, 4.7, 0);
+            rightThighBody.velocity.set(0, 0, 0);
+            rightThighBody.angularVelocity.set(0, 0, 0);
+            rightThighBody.quaternion.set(0, 0, 0, 1);
+
+            rightShinBody.position.set(0.15, 4.0, 0);
+            rightShinBody.velocity.set(0, 0, 0);
+            rightShinBody.angularVelocity.set(0, 0, 0);
+            rightShinBody.quaternion.set(0, 0, 0, 1);
+
+            // Reset constraints if necessary (for now, constraints are static)
+
+            // Reinitialize the ML model
+            model = null;
+            createModel();
+        }
+
+        // ==========================
+        // Apply External Force Function
+        // ==========================
+        document.getElementById('apply-force').addEventListener('click', () => {
+            // Apply an upward force to the torso
+            torsoBody.applyForce(new CANNON.Vec3(0, 100, 0), torsoBody.position);
+        });
+
+        // ==========================
+        // Reinforcement Learning Setup
+        // ==========================
+        // For simplicity, we'll implement a basic reinforcement learning loop
+        // where the AI applies random torques and learns to stabilize the figure.
+        // A full implementation would require more sophisticated techniques.
+
+        let stepCount = 0;
+        const maxSteps = 1000;
+
+        async function trainModel(state, action, reward, nextState) {
+            // Convert states and actions to tensors
+            const stateTensor = tf.tensor2d([state]);
+            const nextStateTensor = tf.tensor2d([nextState]);
+            const actionTensor = tf.tensor2d([action]);
+            const rewardTensor = tf.tensor2d([[reward]]);
+
+            // Predict the Q-values for the current state
+            const qValues = model.predict(stateTensor);
+
+            // Clone qValues to modify the target
+            const target = qValues.clone();
+
+            // Predict the Q-values for the next state
+            const nextQValues = model.predict(nextStateTensor);
+            const maxNextQ = nextQValues.max(1);
+
+            // Update the target for the taken action
+            target.buffer().values[0] = reward + 0.95 * maxNextQ.arraySync()[0];
+
+            // Train the model on the state and updated target
+            await model.fit(stateTensor, target, { epochs: 1 });
+
+            // Dispose tensors to free memory
+            stateTensor.dispose();
+            nextStateTensor.dispose();
+            actionTensor.dispose();
+            rewardTensor.dispose();
+            qValues.dispose();
+            target.dispose();
+            nextQValues.dispose();
+        }
+
+        // ==========================
+        // Animation Loop
+        // ==========================
+        async function animate() {
+            requestAnimationFrame(animate);
+
+            // Update Physics World
+            world.step(1 / 60 * params.speed);
+
+            // Sync Three.js Objects with Cannon.js Bodies
+            torso.position.copy(torsoBody.position);
+            torso.quaternion.copy(torsoBody.quaternion);
+
+            head.position.copy(headBody.position);
+            head.quaternion.copy(headBody.quaternion);
+
+            // Left Thigh
+            const leftThigh = stickFigure.children.find(child => child.geometry.parameters.height === 0.6 && child.position.x === -0.15);
+            leftThigh.position.copy(leftThighBody.position);
+            leftThigh.quaternion.copy(leftThighBody.quaternion);
+
+            // Left Shin
+            const leftShin = stickFigure.children.find(child => child.geometry.parameters.height === 0.6 && child.position.x === -0.15 && child.position.y === -0.3);
+            leftShin.position.copy(leftShinBody.position);
+            leftShin.quaternion.copy(leftShinBody.quaternion);
+
+            // Right Thigh
+            const rightThigh = stickFigure.children.find(child => child.geometry.parameters.height === 0.6 && child.position.x === 0.15);
+            rightThigh.position.copy(rightThighBody.position);
+            rightThigh.quaternion.copy(rightThighBody.quaternion);
+
+            // Right Shin
+            const rightShin = stickFigure.children.find(child => child.geometry.parameters.height === 0.6 && child.position.x === 0.15 && child.position.y === -0.3);
+            rightShin.position.copy(rightShinBody.position);
+            rightShin.quaternion.copy(rightShinBody.quaternion);
+
+            // AI Control Logic
+            if (params.learn && params.toggleAI && model) {
+                // Gather state: positions and velocities of torso and thighs
+                const state = [
+                    torsoBody.position.x, torsoBody.position.y, torsoBody.velocity.x, torsoBody.velocity.y,
+                    leftThighBody.position.x, leftThighBody.position.y, leftThighBody.velocity.x, leftThighBody.velocity.y,
+                    rightThighBody.position.x, rightThighBody.position.y, rightThighBody.velocity.x, rightThighBody.velocity.y
+                ];
+
+                // Simple policy: predict torques for thighs
+                const action = model.predict(tf.tensor2d([state])).arraySync()[0];
+
+                // Apply torques to thighs
+                leftThighBody.torque.set(action[0], 0, 0);
+                rightThighBody.torque.set(action[1], 0, 0);
+
+                // Define reward (e.g., forward movement, balance)
+                const reward = torsoBody.velocity.x; // Simplistic reward: forward velocity
+
+                // Next state can be the same for simplicity
+                const nextState = state; // In a real scenario, it should be the updated state
+
+                // Train the model
+                await trainModel(state, action, reward, nextState);
+
+                // Increment step count
+                stepCount++;
+                if (stepCount > maxSteps) {
+                    resetSimulation();
+                    stepCount = 0;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // ==========================
+        // User Interactions
+        // ==========================
+        // Apply external force button is already implemented above
+
+        // ==========================
+        // Performance Optimizations
+        // ==========================
+        // Utilize requestAnimationFrame for smooth rendering
+        // Limit physics step iterations if necessary
+        // Dispose of unused resources
+    </script>
+</body>
+</html>

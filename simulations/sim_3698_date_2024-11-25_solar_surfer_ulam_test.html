@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Solar System with Boundaries and Styling</title>
+    <style>
+        body, html {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f5f5dc; /* Slightly crème-colored background */
+        }
+        canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+        #log {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            color: lime;
+            font-family: monospace;
+            overflow: hidden;
+            height: 30px;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+<canvas id="solarSystem"></canvas>
+<div id="log"></div>
+<script>
+    const canvas = document.getElementById('solarSystem');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const logDiv = document.getElementById('log');
+    const G = 0.0001; // Gravitational constant for the simulation scale
+    const actions = ["increaseSpeed", "decreaseSpeed", "changeDirection"];
+    let planets = [];
+
+    class CelestialBody {
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+        }
+
+        update(planets) {
+            planets.forEach(planet => {
+                if (planet !== this) {
+                    const dx = planet.x - this.x;
+                    const dy = planet.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const force = G * (this.mass * planet.mass) / (dist * dist);
+                    const accel = force / this.mass;
+
+                    this.velocity.x += (dx / dist) * accel;
+                    this.velocity.y += (dy / dist) * accel;
+                }
+            });
+
+            // Ensure the planets remain within the canvas
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+            this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
+            this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+        }
+    }
+
+    function drawUlamSpiral() {
+        const gridSize = 20; // Grid size for the Ulam spiral
+        const maxI = canvas.width * canvas.height / (gridSize * gridSize);
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        let x = 0, y = 0, dx = 0, dy = -1, temp;
+
+        for (let i = 1; i <= maxI; i++) {
+            if (isPrime(i)) {
+                ctx.fillStyle = '#FFFFFF'; // Color for primes
+                ctx.fillRect(centerX + x * gridSize, centerY + y * gridSize, gridSize, gridSize);
+            }
+            if (x === y || x < 0 && x === -y || x > 0 && x === 1-y) {
+                temp = dx;
+                dx = -dy;
+                dy = temp;
+            }
+            x += dx;
+            y += dy;
+        }
+    }
+
+    function isPrime(num) {
+        for (let i = 2, s = Math.sqrt(num); i <= s; i++) {
+            if (num % i === 0) return false;
+        }
+        return num > 1;
+    }
+
+    function createPlanets(numPlanets) {
+        const pastelColors = ['#FFD7D7', '#D7FFD7', '#D7D7FF', '#FFFFD7', '#FFD7FF'];
+        planets = [];
+        for (let i = 0; i < numPlanets; i++) {
+            const radius = 10 + Math.random() * 10; // 10 to 20
+            const x = radius + Math.random() * (canvas.width - 2 * radius);
+            const y = radius + Math.random() * (canvas.height - 2 * radius);
+            const mass = 50; // Simplified mass
+            const color = pastelColors[i % pastelColors.length];
+            const angle = Math.random() * 2 * Math.PI;
+            const speed = 2;
+            const velocity = {
+                x: Math.cos(angle) * speed,
+                y: Math.sin(angle) * speed
+            };
+            planets.push(new CelestialBody(x, y, radius, mass, color, velocity));
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawUlamSpiral();
+        planets.forEach(planet => {
+            planet.draw();
+            planet.update(planets);
+        });
+    }
+
+    createPlanets(5); // Create 5 planets
+    animate();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        planets.forEach(planet => {
+            planet.x = Math.max(planet.radius, Math.min(canvas.width - planet.radius, planet.x));
+            planet.y = Math.max(planet.radius, Math.min(canvas.height - planet.radius, planet.y));
+        });
+    });
+</script>
+</body>
+</html>
