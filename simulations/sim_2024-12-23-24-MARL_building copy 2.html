@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Interactive MARL Block Stacking Simulation</title>
+    <style>
+        /* styles.css */
+
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-top: 10px;
+        }
+
+        #controls {
+            margin: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 0 10px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007BFF;
+            color: white;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        #status {
+            font-size: 18px;
+            margin-left: 20px;
+            vertical-align: middle;
+        }
+
+        canvas {
+            border: 2px solid #000;
+            background-color: #fff;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>MARL Block Stacking Simulation</h1>
+    <div id="controls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn" disabled>Pause</button>
+        <button id="resetBtn">Reset</button>
+        <span id="status">Status: Stopped</span>
+    </div>
+    <canvas id="simulationCanvas" width="800" height="600"></canvas>
+
+    <!-- Include Matter.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js" integrity="sha512-4psdFnVn6RLXw+HmUKl+1+jfnI+h+KzlAw1XpiCTZz0nCeoAetUq3DjDB77bmEafWt70vXhG+0STlXVuFqI1WQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script>
+        // script.js
+
+        // Module aliases for Matter.js
+        const Engine = Matter.Engine,
+              Render = Matter.Render,
+              World = Matter.World,
+              Bodies = Matter.Bodies,
+              Body = Matter.Body,
+              Events = Matter.Events,
+              Constraint = Matter.Constraint,
+              Mouse = Matter.Mouse,
+              MouseConstraint = Matter.MouseConstraint,
+              Vector = Matter.Vector;
+
+        // Initialize Matter.js engine
+        const engine = Engine.create();
+        const world = engine.world;
+        world.gravity.y = 1; // Set gravity
+
+        // Create renderer manually since we'll use our own canvas
+        // Initialize Canvas
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Renderer settings
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Simulation State
+        let running = false;
+        let animationId;
+
+        // Status Display
+        const statusSpan = document.getElementById('status');
+
+        // Control Buttons
+        const startBtn = document.getElementById('startBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        // Agent Class
+        class Agent {
+            constructor(id, x, y, color, controlType = 'ai') {
+                this.id = id;
+                this.color = color;
+                this.controlType = controlType; // 'ai' or 'user'
+                this.hand = Bodies.circle(x, y, 20, {
+                    isStatic: true,
+                    render: { fillStyle: this.color }
+                });
+                World.add(world, this.hand);
+                this.holding = null; // Currently held block
+            }
+
+            // For AI-controlled agents
+            performAction(blocks) {
+                if (this.holding === null) {
+                    // Try to pick up the nearest available block
+                    let availableBlocks = blocks.filter(block => !block.isHeld);
+                    if (availableBlocks.length > 0) {
+                        // Find the closest block
+                        let closestBlock = availableBlocks.reduce((prev, curr) => {
+                            let prevDist = Vector.magnitude(Vector.sub(this.hand.position, prev.position));
+                            let currDist = Vector.magnitude(Vector.sub(this.hand.position, curr.position));
+                            return (prevDist < currDist) ? prev : curr;
+                        });
+                        // Move hand towards the block
+                        let direction = Vector.normalise(Vector.sub(closestBlock.position, this.hand.position));
+                        Body.translate(this.hand, Vector.mult(direction, 5));
+                        // Check if close enough to pick
+                        let distance = Vector.magnitude(Vector.sub(this.hand.position, closestBlock.position));
+                        if (distance < 30) {
+                            this.pickUp(closestBlock);
+                        }
+                    }
+                } else {
+                    // Move hand upwards to place the block
+                    Body.translate(this.hand, { x: 0, y: -5 });
+                    // Check if hand reaches the top
+                    if (this.hand.position.y < 50) {
+                        this.place();
+                    }
+                }
+            }
+
+            pickUp(block) {
+                if (block.isHeld) return;
+                this.holding = block;
+                block.isHeld = true;
+                // Create a constraint to hold the block
+                this.constraint = Constraint.create({
+                    bodyA: this.hand,
+                    bodyB: block.body,
+                    length: 0,
+                    stiffness: 0.1
+                });
+                World.add(world, this.constraint);
+            }
+
+            place() {
+                if (this.holding) {
+                    // Remove constraint
+                    World.remove(world, this.constraint);
+                    this.holding.isHeld = false;
+                    this.holding = null;
+                }
+            }
+
+            // For user-controlled agents
+            move(dx, dy) {
+                Body.translate(this.hand, { x: dx, y: dy });
+            }
+
+            toggleHold(blocks) {
+                if (this.holding === null) {
+                    // Try to pick up a block
+                    let availableBlocks = blocks.filter(block => !block.isHeld);
+                    if (availableBlocks.length > 0) {
+                        // Pick the first available block
+                        let block = availableBlocks[0];
+                        let distance = Vector.magnitude(Vector.sub(this.hand.position, block.position));
+                        if (distance < 30) {
+                            this.pickUp(block);
+                        }
+                    }
+                } else {
+                    // Place the block
+                    this.place();
+                }
+            }
+        }
+
+        // Block Class
+        class Block {
+            constructor(id, x, y, width, height, color) {
+                this.id = id;
+                this.body = Bodies.rectangle(x, y, width, height, {
+                    restitution: 0.1,
+                    friction: 0.5,
+                    density: 0.002,
+                    render: { fillStyle: color }
+                });
+                this.isHeld = false;
+                World.add(world, this.body);
+            }
+        }
+
+        // Initialize Agents
+        const agent1 = new Agent(1, 100, height - 50, '#FF0000', 'user'); // User-controlled
+        const agent2 = new Agent(2, width - 100, height - 50, '#0000FF', 'ai'); // AI-controlled
+        const agents = [agent1, agent2];
+
+        // Initialize Blocks
+        const blocks = [];
+        const blockColors = ['#8B4513', '#FFD700', '#228B22', '#DC143C'];
+        for (let i = 0; i < 4; i++) {
+            let block = new Block(i, 200 + i * 60, height - 100, 60, 30, blockColors[i]);
+            blocks.push(block);
+        }
+
+        // Ground
+        const ground = Bodies.rectangle(width / 2, height + 25, width, 50, {
+            isStatic: true,
+            render: { fillStyle: '#654321' }
+        });
+        World.add(world, ground);
+
+        // Walls
+        const leftWall = Bodies.rectangle(-25, height / 2, 50, height, { isStatic: true });
+        const rightWall = Bodies.rectangle(width + 25, height / 2, 50, height, { isStatic: true });
+        World.add(world, [leftWall, rightWall]);
+
+        // Mouse Control for dragging blocks
+        const mouse = Mouse.create(canvas);
+        const mouseConstraint = MouseConstraint.create(engine, {
+            mouse: mouse,
+            constraint: {
+                stiffness: 0.2,
+                render: { visible: false }
+            }
+        });
+        World.add(world, mouseConstraint);
+
+        // Keep the mouse in sync with rendering
+        canvas.addEventListener('mousemove', function(event) {
+            mouse.position.x = event.clientX - canvas.getBoundingClientRect().left;
+            mouse.position.y = event.clientY - canvas.getBoundingClientRect().top;
+        });
+
+        // Keyboard Controls for Agent 1 (User-Controlled)
+        const keys = {};
+        document.addEventListener('keydown', function(event) {
+            keys[event.code] = true;
+            // Spacebar to pick/place
+            if (event.code === 'Space') {
+                agent1.toggleHold(blocks);
+            }
+        });
+        document.addEventListener('keyup', function(event) {
+            keys[event.code] = false;
+        });
+
+        // Function to handle user input for Agent 1
+        function handleUserInput() {
+            const speed = 5;
+            if (keys['ArrowLeft']) {
+                agent1.move(-speed, 0);
+            }
+            if (keys['ArrowRight']) {
+                agent1.move(speed, 0);
+            }
+            if (keys['ArrowUp']) {
+                agent1.move(0, -speed);
+            }
+            if (keys['ArrowDown']) {
+                agent1.move(0, speed);
+            }
+        }
+
+        // Renderer Class
+        class Renderer {
+            constructor(engine, world, ctx, width, height) {
+                this.engine = engine;
+                this.world = world;
+                this.ctx = ctx;
+                this.width = width;
+                this.height = height;
+            }
+
+            render() {
+                const bodies = Matter.Composite.allBodies(this.world);
+
+                this.ctx.clearRect(0, 0, this.width, this.height);
+
+                this.ctx.beginPath();
+                for (let body of bodies) {
+                    if (body.isStatic) {
+                        this.ctx.fillStyle = '#654321';
+                    } else {
+                        this.ctx.fillStyle = body.render.fillStyle || '#000';
+                    }
+
+                    // Draw rectangles
+                    if (body.label === 'Rectangle Body') {
+                        const vertices = body.vertices;
+                        this.ctx.moveTo(vertices[0].x, vertices[0].y);
+                        for (let j = 1; j < vertices.length; j++) {
+                            this.ctx.lineTo(vertices[j].x, vertices[j].y);
+                        }
+                        this.ctx.lineTo(vertices[0].x, vertices[0].y);
+                        this.ctx.fill();
+                    }
+
+                    // Draw circles (agents)
+                    if (body.label === 'Circle Body') {
+                        this.ctx.beginPath();
+                        this.ctx.arc(body.position.x, body.position.y, body.circleRadius, 0, 2 * Math.PI);
+                        this.ctx.fill();
+                    }
+                }
+                this.ctx.strokeStyle = '#999';
+                this.ctx.stroke();
+
+                // Optionally, draw constraints
+                /*
+                this.ctx.beginPath();
+                for (let constraint of this.world.constraints) {
+                    if (constraint.bodyA && constraint.bodyB) {
+                        this.ctx.moveTo(constraint.bodyA.position.x, constraint.bodyA.position.y);
+                        this.ctx.lineTo(constraint.bodyB.position.x, constraint.bodyB.position.y);
+                    }
+                }
+                this.ctx.strokeStyle = '#000';
+                this.ctx.stroke();
+                */
+            }
+        }
+
+        const rendererObj = new Renderer(engine, world, ctx, width, height);
+
+        // Event Listeners for Control Buttons
+        startBtn.addEventListener('click', () => {
+            if (!running) {
+                running = true;
+                statusSpan.textContent = 'Status: Running';
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                resetBtn.disabled = true;
+                runSimulation();
+            }
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            if (running) {
+                running = false;
+                statusSpan.textContent = 'Status: Paused';
+                startBtn.disabled = false;
+                pauseBtn.disabled = true;
+                resetBtn.disabled = false;
+                cancelAnimationFrame(animationId);
+            }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            running = false;
+            statusSpan.textContent = 'Status: Stopped';
+            startBtn.disabled = false;
+            pauseBtn.disabled = true;
+            resetBtn.disabled = false;
+            cancelAnimationFrame(animationId);
+            // Remove all blocks and agents from the world
+            blocks.forEach(block => {
+                World.remove(world, block.body);
+            });
+            agents.forEach(agent => {
+                World.remove(world, agent.hand);
+                if (agent.constraint) {
+                    World.remove(world, agent.constraint);
+                }
+            });
+            // Reset environment
+            blocks.length = 0;
+            agents.length = 0;
+            // Re-initialize Agents
+            const newAgent1 = new Agent(1, 100, height - 50, '#FF0000', 'user');
+            const newAgent2 = new Agent(2, width - 100, height - 50, '#0000FF', 'ai');
+            agents.push(newAgent1, newAgent2);
+            // Re-initialize Blocks
+            for (let i = 0; i < 4; i++) {
+                let block = new Block(i, 300 + i * 60, height - 150, 60, 30, blockColors[i]);
+                blocks.push(block);
+            }
+            // Re-add ground and walls if necessary
+            World.add(world, [ground, leftWall, rightWall]);
+            // Re-draw
+            rendererObj.render();
+        });
+
+        // Simulation Loop
+        function runSimulation() {
+            Engine.update(engine, 1000 / 60); // Update at ~60fps
+
+            // Handle user input
+            handleUserInput();
+
+            // AI Agent Actions
+            agent2.performAction(blocks);
+
+            // Render the simulation
+            rendererObj.render();
+
+            // Update status (optional)
+            // statusSpan.textContent = `Status: Running | Tower Height: ${env.towerHeight}`;
+
+            // Continue the loop
+            animationId = requestAnimationFrame(runSimulation);
+        }
+
+        // Initial Render
+        rendererObj.render();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        });
+    </script>
+</body>
+</html>

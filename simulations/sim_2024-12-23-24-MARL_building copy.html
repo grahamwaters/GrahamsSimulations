@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Interactive MARL Block Stacking Simulation</title>
+    <style>
+        /* styles.css */
+
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-top: 10px;
+        }
+
+        #controls {
+            margin: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 0 10px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007BFF;
+            color: white;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        #status {
+            font-size: 18px;
+            margin-left: 20px;
+            vertical-align: middle;
+        }
+
+        canvas {
+            border: 2px solid #000;
+            background-color: #fff;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>MARL Block Stacking Simulation</h1>
+    <div id="controls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn" disabled>Pause</button>
+        <button id="resetBtn">Reset</button>
+        <span id="status">Status: Stopped</span>
+    </div>
+    <canvas id="simulationCanvas" width="600" height="600"></canvas>
+
+    <!-- Include TensorFlow.js Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+    <script>
+        // script.js
+
+        // Block Class
+        class Block {
+            constructor(id, x, y, size = 50) {
+                this.id = id;
+                this.x = x; // Grid x-coordinate
+                this.y = y; // Grid y-coordinate
+                this.size = size;
+                this.held = false; // If the block is held by an agent
+                this.color = this.getRandomColor();
+            }
+
+            getRandomColor() {
+                const colors = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33F6'];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+        }
+
+        // Environment Class
+        class Environment {
+            constructor(gridWidth, gridHeight, blockSize, numBlocks) {
+                this.gridWidth = gridWidth;
+                this.gridHeight = gridHeight;
+                this.blockSize = blockSize;
+                this.numBlocks = numBlocks;
+                this.blocks = [];
+                this.towerHeight = 0;
+                this.reset();
+            }
+
+            reset() {
+                this.blocks = [];
+                for (let i = 0; i < this.numBlocks; i++) {
+                    let x = Math.floor(Math.random() * this.gridWidth);
+                    let y = 0;
+                    this.blocks.push(new Block(i, x, y, this.blockSize));
+                }
+                this.towerHeight = 0;
+            }
+
+            getState() {
+                let state = [];
+                this.blocks.forEach(block => {
+                    state.push(block.x / this.gridWidth); // Normalize x
+                    state.push(block.y / this.gridHeight); // Normalize y
+                    state.push(block.held ? 1 : 0); // Held status
+                });
+                state.push(this.towerHeight / this.gridHeight); // Normalize tower height
+                return state;
+            }
+
+            step(actions) {
+                Object.keys(actions).forEach(agent => {
+                    let action = actions[agent];
+                    if (action.type === 'pick') {
+                        let block = this.blocks[action.blockId];
+                        if (!block.held && this.isBlockAccessible(block)) {
+                            block.held = true;
+                        }
+                    } else if (action.type === 'place') {
+                        let block = this.blocks[action.blockId];
+                        if (block.held) {
+                            block.held = false;
+                            // Ensure targetX and targetY are within bounds
+                            let targetX = Math.min(Math.floor(action.targetX * this.gridWidth), this.gridWidth - 1);
+                            let targetY = Math.min(Math.floor(action.targetY * this.gridHeight), this.gridHeight - 1);
+                            block.x = targetX;
+                            block.y = targetY;
+                            this.updateTowerHeight();
+                        }
+                    }
+                });
+
+                let reward = this.computeReward();
+                return { state: this.getState(), reward, done: false };
+            }
+
+            isBlockAccessible(block) {
+                return block.y === this.getMaxY(block.x);
+            }
+
+            getMaxY(x) {
+                let maxY = 0;
+                this.blocks.forEach(block => {
+                    if (block.x === x && block.y > maxY) {
+                        maxY = block.y;
+                    }
+                });
+                return maxY;
+            }
+
+            updateTowerHeight() {
+                let heights = this.blocks.map(block => block.y);
+                this.towerHeight = Math.max(...heights);
+            }
+
+            computeReward() {
+                return this.towerHeight;
+            }
+        }
+
+        // Agent Class
+        class Agent {
+            constructor(id, env, name) {
+                this.id = id;
+                this.env = env;
+                this.name = name;
+                this.epsilon = 1.0; // Exploration rate
+                this.epsilonDecay = 0.995;
+                this.epsilonMin = 0.05;
+                this.learningRate = 0.001;
+                this.model = this.createModel();
+                this.memory = [];
+                this.batchSize = 32;
+                this.gamma = 0.95; // Discount factor
+                this.optimizer = tf.train.adam(this.learningRate);
+                this.lossFunction = tf.losses.meanSquaredError;
+            }
+
+            createModel() {
+                const model = tf.sequential();
+                model.add(tf.layers.dense({ inputShape: [this.env.numBlocks * 3 + 1], units: 64, activation: 'relu' }));
+                model.add(tf.layers.dense({ units: 64, activation: 'relu' }));
+                model.add(tf.layers.dense({ units: 4, activation: 'linear' })); // 4 possible actions
+                return model;
+            }
+
+            async selectAction(state) {
+                if (Math.random() < this.epsilon) {
+                    // Explore: random action
+                    return this.getRandomAction();
+                } else {
+                    // Exploit: use model to predict action
+                    const input = tf.tensor2d([state]);
+                    const prediction = this.model.predict(input);
+                    const actionIndex = (await prediction.argMax(-1).data())[0];
+                    input.dispose();
+                    prediction.dispose();
+                    return this.decodeAction(actionIndex);
+                }
+            }
+
+            getRandomAction() {
+                const actionType = Math.random() < 0.5 ? 'pick' : 'place';
+                const blockId = Math.floor(Math.random() * this.env.numBlocks);
+                if (actionType === 'pick') {
+                    return { type: 'pick', blockId };
+                } else {
+                    const targetX = Math.random();
+                    const targetY = Math.random();
+                    return { type: 'place', blockId, targetX, targetY };
+                }
+            }
+
+            decodeAction(actionIndex) {
+                // Define mapping based on the number of possible actions
+                // For simplicity, assume 4 actions:
+                // 0: Pick Block 0
+                // 1: Pick Block 1
+                // 2: Place Block 0 at random location
+                // 3: Place Block 1 at random location
+                switch(actionIndex) {
+                    case 0:
+                        return { type: 'pick', blockId: 0 };
+                    case 1:
+                        return { type: 'pick', blockId: 1 };
+                    case 2:
+                        return { type: 'place', blockId: 0, targetX: Math.random(), targetY: Math.random() };
+                    case 3:
+                        return { type: 'place', blockId: 1, targetX: Math.random(), targetY: Math.random() };
+                    default:
+                        return this.getRandomAction();
+                }
+            }
+
+            remember(experience) {
+                this.memory.push(experience);
+                if (this.memory.length > 2000) {
+                    this.memory.shift();
+                }
+            }
+
+            async replay() {
+                if (this.memory.length < this.batchSize) return;
+
+                const batch = [];
+                for (let i = 0; i < this.batchSize; i++) {
+                    const index = Math.floor(Math.random() * this.memory.length);
+                    batch.push(this.memory[index]);
+                }
+
+                const states = batch.map(exp => exp.state);
+                const actions = batch.map(exp => this.getActionIndex(exp.action));
+                const rewards = batch.map(exp => exp.reward);
+                const nextStates = batch.map(exp => exp.nextState);
+
+                // Predict Q-values for current states
+                const xs = tf.tensor2d(states);
+                const currentQ = this.model.predict(xs).arraySync();
+
+                // Predict Q-values for next states
+                const nextXs = tf.tensor2d(nextStates);
+                const nextQ = this.model.predict(nextXs).arraySync();
+
+                // Update Q-values with rewards
+                for (let i = 0; i < batch.length; i++) {
+                    currentQ[i][actions[i]] = rewards[i] + this.gamma * Math.max(...nextQ[i]);
+                }
+
+                const ys = tf.tensor2d(currentQ);
+
+                // Train the model
+                await this.optimizer.minimize(() => {
+                    const preds = this.model.predict(xs);
+                    const loss = this.lossFunction(ys, preds);
+                    preds.dispose();
+                    return loss;
+                });
+
+                xs.dispose();
+                nextXs.dispose();
+                ys.dispose();
+
+                this.decayEpsilon();
+            }
+
+            getActionIndex(action) {
+                // Map action to index
+                // This should match the decodeAction mapping
+                if (action.type === 'pick') {
+                    return action.blockId;
+                } else if (action.type === 'place') {
+                    return this.env.numBlocks + action.blockId;
+                }
+                return 0;
+            }
+
+            decayEpsilon() {
+                if (this.epsilon > this.epsilonMin) {
+                    this.epsilon *= this.epsilonDecay;
+                }
+            }
+        }
+
+        // Renderer Class
+        class Renderer {
+            constructor(canvasId, env) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.env = env;
+                this.gridWidth = env.gridWidth;
+                this.gridHeight = env.gridHeight;
+                this.cellSize = this.canvas.width / this.gridWidth;
+            }
+
+            draw() {
+                // Clear canvas
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw grid
+                this.drawGrid();
+
+                // Draw blocks
+                this.env.blocks.forEach(block => {
+                    this.drawBlock(block);
+                });
+
+                // Draw tower height
+                this.drawInfo();
+            }
+
+            drawGrid() {
+                this.ctx.strokeStyle = '#ddd';
+                for (let i = 0; i <= this.gridWidth; i++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(i * this.cellSize, 0);
+                    this.ctx.lineTo(i * this.cellSize, this.canvas.height);
+                    this.ctx.stroke();
+                }
+                for (let j = 0; j <= this.gridHeight; j++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, j * this.cellSize);
+                    this.ctx.lineTo(this.canvas.width, j * this.cellSize);
+                    this.ctx.stroke();
+                }
+            }
+
+            drawBlock(block) {
+                const x = block.x * this.cellSize;
+                const y = this.canvas.height - (block.y + 1) * this.cellSize;
+                this.ctx.fillStyle = block.color;
+                this.ctx.fillRect(x + 2, y + 2, this.cellSize - 4, this.cellSize - 4);
+                this.ctx.strokeStyle = 'black';
+                this.ctx.strokeRect(x + 2, y + 2, this.cellSize - 4, this.cellSize - 4);
+
+                // Indicate if held
+                if (block.held) {
+                    this.ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                    this.ctx.fillRect(x + 2, y + 2, this.cellSize - 4, this.cellSize - 4);
+                }
+            }
+
+            drawInfo() {
+                this.ctx.fillStyle = 'black';
+                this.ctx.font = '16px Arial';
+                this.ctx.fillText(`Tower Height: ${this.env.towerHeight}`, 10, 20);
+            }
+        }
+
+        // Simulation Controls and Loop
+
+        // Initialize Environment
+        const gridWidth = 10;
+        const gridHeight = 10;
+        const blockSize = 50;
+        const numBlocks = 8; // Reduced number for better visualization
+        const env = new Environment(gridWidth, gridHeight, blockSize, numBlocks);
+
+        // Initialize Renderer
+        const renderer = new Renderer('simulationCanvas', env);
+        renderer.draw();
+
+        // Initialize Agents
+        const agent1 = new Agent(1, env, 'Agent 1');
+        const agent2 = new Agent(2, env, 'Agent 2');
+        const agents = [agent1, agent2];
+
+        // Simulation State
+        let running = false;
+        let animationId;
+
+        // Control Buttons
+        const startBtn = document.getElementById('startBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const statusSpan = document.getElementById('status');
+
+        startBtn.addEventListener('click', () => {
+            if (!running) {
+                running = true;
+                statusSpan.textContent = 'Status: Running';
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                resetBtn.disabled = true;
+                simulationStep();
+            }
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            if (running) {
+                running = false;
+                statusSpan.textContent = 'Status: Paused';
+                startBtn.disabled = false;
+                pauseBtn.disabled = true;
+                resetBtn.disabled = false;
+                cancelAnimationFrame(animationId);
+            }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            running = false;
+            statusSpan.textContent = 'Status: Stopped';
+            startBtn.disabled = false;
+            pauseBtn.disabled = true;
+            resetBtn.disabled = false;
+            cancelAnimationFrame(animationId);
+            env.reset();
+            agents.forEach(agent => {
+                agent.epsilon = 1.0;
+                agent.memory = [];
+                agent.model = agent.createModel();
+            });
+            renderer.draw();
+        });
+
+        // Main Simulation Loop
+        async function simulationStep() {
+            if (!running) return;
+
+            // Get current state
+            const state = env.getState();
+
+            // Agents select actions
+            const actions = {};
+            for (let agent of agents) {
+                const action = await agent.selectAction(state);
+                actions[agent.name] = action;
+            }
+
+            // Apply actions to the environment
+            const result = env.step(actions);
+
+            // Agents remember experiences
+            for (let agent of agents) {
+                const experience = {
+                    state: state,
+                    action: actions[agent.name],
+                    reward: result.reward,
+                    nextState: result.state
+                };
+                agent.remember(experience);
+            }
+
+            // Agents train
+            for (let agent of agents) {
+                await agent.replay();
+            }
+
+            // Update visualization
+            renderer.draw();
+
+            // Continue the loop
+            animationId = requestAnimationFrame(simulationStep);
+        }
+    </script>
+</body>
+</html>
