@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Autonomous RL Art</title>
+    <style>
+        /* Reset and Basic Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Canvas Styling */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Info Panel */
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 16px;
+            backdrop-filter: blur(10px);
+            transition: background 0.3s ease;
+        }
+
+        #info:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        /* Responsive Text */
+        @media (max-width: 600px) {
+            #info {
+                font-size: 14px;
+                padding: 10px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Steps: <span id="steps">0</span></div>
+    <canvas id="artCanvas"></canvas>
+
+    <!-- TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+
+    <script>
+        // Canvas Setup
+        const canvas = document.getElementById('artCanvas');
+        const ctx = canvas.getContext('2d');
+        resizeCanvas();
+
+        // Info Elements
+        const stepsElement = document.getElementById('steps');
+
+        // Handle Window Resize
+        window.addEventListener('resize', resizeCanvas);
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Optionally, you can redraw or reset the canvas here
+        }
+
+        // Utility Functions
+        function getRandomInt(max) {
+            return Math.floor(Math.random() * max);
+        }
+
+        function getRandomColor(alpha = 0.6) {
+            const hue = Math.random() * 360;
+            const saturation = 60 + Math.random() * 20; // 60-80%
+            const lightness = 50 + Math.random() * 10;  // 50-60%
+            return `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+        }
+
+        // RL Agent Class using Q-Learning with TensorFlow.js
+        class RLAgent {
+            constructor(stateSize, actionSize, learningRate=0.001, gamma=0.95) {
+                this.stateSize = stateSize;
+                this.actionSize = actionSize;
+                this.gamma = gamma;
+                this.learningRate = learningRate;
+                this.epsilon = 1.0; // Exploration rate
+                this.epsilonMin = 0.01;
+                this.epsilonDecay = 0.995;
+                this.memory = [];
+                this.maxMemory = 2000;
+                this.batchSize = 64;
+
+                this.model = this.createModel();
+            }
+
+            createModel() {
+                const model = tf.sequential();
+                model.add(tf.layers.dense({inputShape: [this.stateSize], units: 64, activation: 'relu'}));
+                model.add(tf.layers.dense({units: 64, activation: 'relu'}));
+                model.add(tf.layers.dense({units: this.actionSize, activation: 'linear'}));
+                model.compile({optimizer: tf.train.adam(this.learningRate), loss: 'meanSquaredError'});
+                return model;
+            }
+
+            remember(state, action, reward, nextState, done) {
+                if (this.memory.length >= this.maxMemory) {
+                    this.memory.shift();
+                }
+                this.memory.push({state, action, reward, nextState, done});
+            }
+
+            async act(state) {
+                if (Math.random() < this.epsilon) {
+                    return getRandomInt(this.actionSize);
+                }
+                const stateTensor = tf.tensor2d([state]);
+                const qValues = this.model.predict(stateTensor);
+                const action = (await qValues.argMax(-1).data())[0];
+                tf.dispose([stateTensor, qValues]);
+                return action;
+            }
+
+            async replay() {
+                if (this.memory.length < this.batchSize) return;
+                const batch = [];
+                for (let i = 0; i < this.batchSize; i++) {
+                    const idx = getRandomInt(this.memory.length);
+                    batch.push(this.memory[idx]);
+                }
+
+                const states = batch.map(item => item.state);
+                const nextStates = batch.map(item => item.nextState);
+                const actions = batch.map(item => item.action);
+                const rewards = batch.map(item => item.reward);
+                const dones = batch.map(item => item.done);
+
+                const statesTensor = tf.tensor2d(states);
+                const nextStatesTensor = tf.tensor2d(nextStates);
+                const target = this.model.predict(statesTensor).arraySync();
+                const nextQ = this.model.predict(nextStatesTensor).arraySync();
+
+                for (let i = 0; i < batch.length; i++) {
+                    if (dones[i]) {
+                        target[i][actions[i]] = rewards[i];
+                    } else {
+                        target[i][actions[i]] = rewards[i] + this.gamma * Math.max(...nextQ[i]);
+                    }
+                }
+
+                const targetTensor = tf.tensor2d(target);
+                await this.model.fit(statesTensor, targetTensor, {epochs: 1, verbose: 0});
+
+                tf.dispose([statesTensor, nextStatesTensor, targetTensor]);
+
+                if (this.epsilon > this.epsilonMin) {
+                    this.epsilon *= this.epsilonDecay;
+                }
+            }
+        }
+
+        // Initialize Agent
+        const stateSize = 4; // [canvasWidth, canvasHeight, lastX, lastY]
+        const actionSize = 5; // [draw, move up, move down, move left, move right]
+        const agent = new RLAgent(stateSize, actionSize);
+
+        // Initial Position
+        let lastX = canvas.width / 2;
+        let lastY = canvas.height / 2;
+
+        // Trail for Visual Effect
+        const trails = [];
+
+        // Main Loop
+        let steps = 0;
+        async function main() {
+            // Define state
+            const state = [canvas.width, canvas.height, lastX, lastY];
+
+            // Choose action
+            const action = await agent.act(state);
+
+            // Perform action
+            let reward = 0;
+            let done = false;
+            const stepSize = 15;
+            let color = getRandomColor();
+
+            switch(action) {
+                case 0: // Draw
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(lastX, lastY, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    reward = 1;
+                    // Add trail
+                    trails.push({x: lastX, y: lastY, color: color, alpha: 1.0});
+                    break;
+                case 1: // Move up
+                    lastY = Math.max(lastY - stepSize, 0);
+                    reward = 0.2;
+                    break;
+                case 2: // Move down
+                    lastY = Math.min(lastY + stepSize, canvas.height);
+                    reward = 0.2;
+                    break;
+                case 3: // Move left
+                    lastX = Math.max(lastX - stepSize, 0);
+                    reward = 0.2;
+                    break;
+                case 4: // Move right
+                    lastX = Math.min(lastX + stepSize, canvas.width);
+                    reward = 0.2;
+                    break;
+                default:
+                    break;
+            }
+
+            // New state
+            const nextState = [canvas.width, canvas.height, lastX, lastY];
+
+            // Reward based on proximity to center
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const distance = Math.hypot(lastX - centerX, lastY - centerY);
+            reward += (canvas.width / 2 - distance) / (canvas.width / 2);
+
+            // Check if done
+            if (distance < 15) {
+                done = true;
+                lastX = canvas.width / 2;
+                lastY = canvas.height / 2;
+                reward += 10;
+            }
+
+            // Remember experience
+            agent.remember(state, action, reward, nextState, done);
+
+            // Replay and learn
+            await agent.replay();
+
+            // Update steps
+            steps++;
+            stepsElement.innerText = steps;
+
+            // Update Trails for Visual Effect
+            updateTrails();
+
+            // Continue the loop
+            requestAnimationFrame(main);
+        }
+
+        // Function to Update Trails
+        function updateTrails() {
+            for (let i = trails.length - 1; i >= 0; i--) {
+                const trail = trails[i];
+                trail.alpha -= 0.01;
+                if (trail.alpha <= 0) {
+                    trails.splice(i, 1);
+                } else {
+                    ctx.fillStyle = `hsla(${hslFromColor(trail.color).h}, ${hslFromColor(trail.color).s}%, ${hslFromColor(trail.color).l}%, ${trail.alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(trail.x, trail.y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // Helper Function to Extract HSL from HSLA string
+        function hslFromColor(hsla) {
+            const match = hsla.match(/hsla\((\d+),\s*(\d+)%,\s*(\d+)%,\s*([\d.]+)\)/);
+            return match ? {h: match[1], s: match[2], l: match[3]} : {h: 0, s: 0, l: 0};
+        }
+
+        // Start the Main Loop
+        main();
+    </script>
+</body>
+</html>

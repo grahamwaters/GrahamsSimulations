@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Advanced Autonomous RL Art</title>
+    <style>
+        /* Reset and Basic Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            position: relative;
+        }
+
+        /* Canvas Styling */
+        #backgroundCanvas, #particleCanvas, #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: block;
+        }
+
+        /* Info Panel */
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 16px;
+            backdrop-filter: blur(10px);
+            transition: background 0.3s ease;
+            z-index: 10;
+        }
+
+        #info:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        /* Control Panel */
+        #controlPanel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+            transition: background 0.3s ease;
+            z-index: 10;
+        }
+
+        #controlPanel:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        /* Sliders and Buttons */
+        .control-group {
+            margin-bottom: 10px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+        }
+
+        .control-group button {
+            padding: 8px 12px;
+            margin-right: 5px;
+            border: none;
+            border-radius: 5px;
+            background-color: #2a5298;
+            color: #fff;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .control-group button:hover {
+            background-color: #1e3c72;
+        }
+
+        /* Interactive Overlay */
+        #interactiveOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+        }
+
+        /* Responsive Text */
+        @media (max-width: 600px) {
+            #info, #controlPanel {
+                font-size: 12px;
+                padding: 10px 15px;
+            }
+
+            .control-group button {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Canvas Layers -->
+    <canvas id="backgroundCanvas"></canvas>
+    <canvas id="particleCanvas"></canvas>
+    <canvas id="drawingCanvas"></canvas>
+
+    <!-- Info Panel -->
+    <div id="info">
+        Total Steps: <span id="steps">0</span><br>
+        Epsilon: <span id="epsilon">1.0</span>
+    </div>
+
+    <!-- Control Panel -->
+    <div id="controlPanel">
+        <div class="control-group">
+            <label for="learningRate">Learning Rate: <span id="lrValue">0.001</span></label>
+            <input type="range" id="learningRate" min="0.0001" max="0.01" step="0.0001" value="0.001">
+        </div>
+        <div class="control-group">
+            <label for="explorationRate">Exploration Rate: <span id="explorationValue">1.0</span></label>
+            <input type="range" id="explorationRate" min="0.0" max="1.0" step="0.01" value="1.0">
+        </div>
+        <div class="control-group">
+            <label for="stepSize">Step Size: <span id="stepSizeValue">15</span></label>
+            <input type="range" id="stepSize" min="5" max="30" step="1" value="15">
+        </div>
+        <div class="control-group">
+            <button id="pauseBtn">Pause</button>
+            <button id="resetBtn">Reset</button>
+        </div>
+    </div>
+
+    <!-- Interactive Overlay -->
+    <div id="interactiveOverlay"></div>
+
+    <!-- TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+
+    <script>
+        /*********************
+         * Canvas Setup
+         *********************/
+        const backgroundCanvas = document.getElementById('backgroundCanvas');
+        const bgCtx = backgroundCanvas.getContext('2d');
+
+        const particleCanvas = document.getElementById('particleCanvas');
+        const pCtx = particleCanvas.getContext('2d');
+
+        const drawingCanvas = document.getElementById('drawingCanvas');
+        const ctx = drawingCanvas.getContext('2d');
+
+        resizeCanvases();
+
+        // Handle Window Resize
+        window.addEventListener('resize', resizeCanvases);
+
+        function resizeCanvases() {
+            backgroundCanvas.width = window.innerWidth;
+            backgroundCanvas.height = window.innerHeight;
+
+            particleCanvas.width = window.innerWidth;
+            particleCanvas.height = window.innerHeight;
+
+            drawingCanvas.width = window.innerWidth;
+            drawingCanvas.height = window.innerHeight;
+
+            // Optionally, redraw or reset canvases on resize
+        }
+
+        /*********************
+         * Info and Control Elements
+         *********************/
+        // Info Elements
+        const stepsElement = document.getElementById('steps');
+        const epsilonElement = document.getElementById('epsilon');
+
+        // Control Panel Elements
+        const learningRateSlider = document.getElementById('learningRate');
+        const lrValueLabel = document.getElementById('lrValue');
+        const explorationRateSlider = document.getElementById('explorationRate');
+        const explorationValueLabel = document.getElementById('explorationValue');
+        const stepSizeSlider = document.getElementById('stepSize');
+        const stepSizeValueLabel = document.getElementById('stepSizeValue');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        // Interactive Overlay for User Influence
+        const interactiveOverlay = document.getElementById('interactiveOverlay');
+
+        /*********************
+         * Utility Functions
+         *********************/
+        function getRandomInt(max) {
+            return Math.floor(Math.random() * max);
+        }
+
+        function getRandomColor(alpha = 0.6) {
+            const hue = Math.random() * 360;
+            const saturation = 60 + Math.random() * 20; // 60-80%
+            const lightness = 50 + Math.random() * 10;  // 50-60%
+            return `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+        }
+
+        // Helper Function to Extract HSL from HSLA string
+        function hslFromColor(hsla) {
+            const match = hsla.match(/hsla\((\d+),\s*(\d+)%,\s*(\d+)%,\s*([\d.]+)\)/);
+            return match ? {h: match[1], s: match[2], l: match[3]} : {h: 0, s: 0, l: 0};
+        }
+
+        /*********************
+         * Reinforcement Learning Agent Class
+         *********************/
+        class RLAgent {
+            constructor(id, stateSize, actionSize, learningRate=0.001, gamma=0.95, color) {
+                this.id = id;
+                this.stateSize = stateSize;
+                this.actionSize = actionSize;
+                this.gamma = gamma;
+                this.learningRate = learningRate;
+                this.epsilon = 1.0; // Exploration rate
+                this.epsilonMin = 0.01;
+                this.epsilonDecay = 0.995;
+                this.memory = [];
+                this.maxMemory = 5000;
+                this.batchSize = 64;
+                this.color = color;
+
+                this.shape = 'circle'; // Default shape
+                this.opacity = 0.6; // Default opacity
+
+                this.model = this.createModel();
+            }
+
+            createModel() {
+                const model = tf.sequential();
+                model.add(tf.layers.dense({inputShape: [this.stateSize], units: 128, activation: 'relu'}));
+                model.add(tf.layers.dense({units: 128, activation: 'relu'}));
+                model.add(tf.layers.dense({units: this.actionSize, activation: 'linear'}));
+                model.compile({optimizer: tf.train.adam(this.learningRate), loss: 'meanSquaredError'});
+                return model;
+            }
+
+            remember(state, action, reward, nextState, done) {
+                if (this.memory.length >= this.maxMemory) {
+                    this.memory.shift();
+                }
+                this.memory.push({state, action, reward, nextState, done});
+            }
+
+            async act(state) {
+                if (Math.random() < this.epsilon) {
+                    return getRandomInt(this.actionSize);
+                }
+                const stateTensor = tf.tensor2d([state]);
+                const qValues = this.model.predict(stateTensor);
+                const action = (await qValues.argMax(-1).data())[0];
+                tf.dispose([stateTensor, qValues]);
+                return action;
+            }
+
+            async replay() {
+                if (this.memory.length < this.batchSize) return;
+                const batch = [];
+                for (let i = 0; i < this.batchSize; i++) {
+                    const idx = getRandomInt(this.memory.length);
+                    batch.push(this.memory[idx]);
+                }
+
+                const states = batch.map(item => item.state);
+                const nextStates = batch.map(item => item.nextState);
+                const actions = batch.map(item => item.action);
+                const rewards = batch.map(item => item.reward);
+                const dones = batch.map(item => item.done);
+
+                const statesTensor = tf.tensor2d(states);
+                const nextStatesTensor = tf.tensor2d(nextStates);
+                const target = this.model.predict(statesTensor).arraySync();
+                const nextQ = this.model.predict(nextStatesTensor).arraySync();
+
+                for (let i = 0; i < batch.length; i++) {
+                    if (dones[i]) {
+                        target[i][actions[i]] = rewards[i];
+                    } else {
+                        target[i][actions[i]] = rewards[i] + this.gamma * Math.max(...nextQ[i]);
+                    }
+                }
+
+                const targetTensor = tf.tensor2d(target);
+                await this.model.fit(statesTensor, targetTensor, {epochs: 1, verbose: 0});
+
+                tf.dispose([statesTensor, nextStatesTensor, targetTensor]);
+
+                if (this.epsilon > this.epsilonMin) {
+                    this.epsilon *= this.epsilonDecay;
+                }
+            }
+
+            updateLearningRate(newRate) {
+                this.learningRate = newRate;
+                this.model.compile({optimizer: tf.train.adam(this.learningRate), loss: 'meanSquaredError'});
+            }
+
+            updateExplorationRate(newEpsilon) {
+                this.epsilon = newEpsilon;
+            }
+
+            clearMemory() {
+                this.memory = [];
+            }
+
+            changeShape(newShape) {
+                this.shape = newShape;
+            }
+
+            changeOpacity(newOpacity) {
+                this.opacity = newOpacity;
+            }
+
+            changeColor(newColor) {
+                this.color = newColor;
+            }
+        }
+
+        /*********************
+         * Particle System for Background
+         *********************/
+        class Particle {
+            constructor(x, y, vx, vy, size, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.size = size;
+                this.color = color;
+                this.alpha = Math.random() * 0.5 + 0.5;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Wrap around the edges
+                if (this.x > particleCanvas.width) this.x = 0;
+                if (this.x < 0) this.x = particleCanvas.width;
+                if (this.y > particleCanvas.height) this.y = 0;
+                if (this.y < 0) this.y = particleCanvas.height;
+            }
+
+            draw(ctx) {
+                ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        const particles = [];
+        const particleCount = 100;
+
+        function initParticles() {
+            for (let i = 0; i < particleCount; i++) {
+                const x = Math.random() * particleCanvas.width;
+                const y = Math.random() * particleCanvas.height;
+                const vx = (Math.random() - 0.5) * 1;
+                const vy = (Math.random() - 0.5) * 1;
+                const size = Math.random() * 3 + 1;
+                const color = {r: 255, g: 255, b: 255}; // White particles
+                particles.push(new Particle(x, y, vx, vy, size, color));
+            }
+        }
+
+        function animateParticles() {
+            pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+            particles.forEach(particle => {
+                particle.update();
+                particle.draw(pCtx);
+            });
+            requestAnimationFrame(animateParticles);
+        }
+
+        initParticles();
+        animateParticles();
+
+        /*********************
+         * Background Animations
+         *********************/
+        let bgHue = 0;
+        function drawBackground() {
+            bgCtx.fillStyle = `hsla(${bgHue}, 50%, 20%, 0.05)`;
+            bgCtx.fillRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
+            bgHue = (bgHue + 0.1) % 360;
+            requestAnimationFrame(drawBackground);
+        }
+
+        drawBackground();
+
+        /*********************
+         * Initialize Agents
+         *********************/
+        const agents = [];
+        const numberOfAgents = 3; // For example, 3 agents
+        const shapes = ['circle', 'square', 'triangle'];
+        const colors = ['hsla(0, 100%, 50%, 0.6)', 'hsla(120, 100%, 50%, 0.6)', 'hsla(240, 100%, 50%, 0.6)'];
+
+        for (let i = 0; i < numberOfAgents; i++) {
+            const agentColor = colors[i % colors.length];
+            agents.push(new RLAgent(i, 6, 10, 0.001, 0.95, agentColor));
+            agents[i].changeShape(shapes[i % shapes.length]);
+        }
+
+        /*********************
+         * Trails for Visual Effect
+         *********************/
+        const trails = [];
+
+        /*********************
+         * Control Variables
+         *********************/
+        let isPaused = false;
+
+        /*********************
+         * Event Listeners for Control Panel
+         *********************/
+        learningRateSlider.addEventListener('input', () => {
+            const lr = parseFloat(learningRateSlider.value);
+            lrValueLabel.textContent = lr.toFixed(4);
+            agents.forEach(agent => agent.updateLearningRate(lr));
+        });
+
+        explorationRateSlider.addEventListener('input', () => {
+            const er = parseFloat(explorationRateSlider.value);
+            explorationValueLabel.textContent = er.toFixed(2);
+            agents.forEach(agent => agent.updateExplorationRate(er));
+        });
+
+        stepSizeSlider.addEventListener('input', () => {
+            stepSizeValueLabel.textContent = stepSizeSlider.value;
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            isPaused = !isPaused;
+            pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+        });
+
+        resetBtn.addEventListener('click', () => {
+            resetCanvas();
+            agents.forEach(agent => agent.clearMemory());
+            steps = 0;
+            stepsElement.textContent = steps;
+        });
+
+        /*********************
+         * Interactive Elements
+         *********************/
+        // User Influence via Mouse Clicks
+        interactiveOverlay.addEventListener('click', (e) => {
+            const rect = interactiveOverlay.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            // Influence nearest agent
+            let nearestAgent = agents[0];
+            let minDist = Math.hypot(x - agents[0].lastX, y - agents[0].lastY);
+            for (let agent of agents) {
+                const dist = Math.hypot(x - agent.lastX, y - agent.lastY);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestAgent = agent;
+                }
+            }
+            // Set agent's position to click location
+            nearestAgent.lastX = x;
+            nearestAgent.lastY = y;
+            // Provide a positive reward
+            nearestAgent.remember(
+                [drawingCanvas.width, drawingCanvas.height, nearestAgent.lastX, nearestAgent.lastY, nearestAgent.velocityX, nearestAgent.velocityY],
+                0, // Assume action 0 (Draw)
+                5, // Positive reward
+                [drawingCanvas.width, drawingCanvas.height, nearestAgent.lastX, nearestAgent.lastY, nearestAgent.velocityX, nearestAgent.velocityY],
+                false
+            );
+        });
+
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'p' || e.key === 'P') {
+                isPaused = !isPaused;
+                pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+            } else if (e.key === 'r' || e.key === 'R') {
+                resetCanvas();
+                agents.forEach(agent => agent.clearMemory());
+                steps = 0;
+                stepsElement.textContent = steps;
+            }
+        });
+
+        /*********************
+         * Function to Reset Canvas
+         *********************/
+        function resetCanvas() {
+            ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            trails.length = 0;
+            // Reset agents' positions
+            agents.forEach(agent => {
+                agent.lastX = drawingCanvas.width / 2;
+                agent.lastY = drawingCanvas.height / 2;
+                agent.velocityX = 0;
+                agent.velocityY = 0;
+                agent.changeOpacity(0.6);
+                agent.changeColor(getRandomColor(0.6));
+            });
+        }
+
+        /*********************
+         * Main Loop
+         *********************/
+        let steps = 0;
+        async function main() {
+            if (!isPaused) {
+                for (let agent of agents) {
+                    // Define state
+                    const state = [
+                        drawingCanvas.width,
+                        drawingCanvas.height,
+                        agent.lastX,
+                        agent.lastY,
+                        agent.velocityX,
+                        agent.velocityY
+                    ];
+
+                    // Choose action
+                    const action = await agent.act(state);
+
+                    // Perform action
+                    let reward = 0;
+                    let done = false;
+                    const stepSize = parseInt(stepSizeSlider.value);
+                    let shape = agent.shape;
+                    let color = agent.color;
+                    let opacity = agent.opacity;
+
+                    switch(action) {
+                        case 0: // Draw
+                            ctx.fillStyle = color;
+                            ctx.globalAlpha = opacity;
+                            drawShape(shape, agent.lastX, agent.lastY, 8);
+                            ctx.globalAlpha = 1.0; // Reset alpha
+                            reward = 1;
+                            // Add trail
+                            trails.push({x: agent.lastX, y: agent.lastY, color: color, shape: shape, alpha: 1.0});
+                            break;
+                        case 1: // Move up
+                            agent.velocityY = -stepSize;
+                            agent.lastY = Math.max(agent.lastY + agent.velocityY, 0);
+                            reward = 0.2;
+                            break;
+                        case 2: // Move down
+                            agent.velocityY = stepSize;
+                            agent.lastY = Math.min(agent.lastY + agent.velocityY, drawingCanvas.height);
+                            reward = 0.2;
+                            break;
+                        case 3: // Move left
+                            agent.velocityX = -stepSize;
+                            agent.lastX = Math.max(agent.lastX + agent.velocityX, 0);
+                            reward = 0.2;
+                            break;
+                        case 4: // Move right
+                            agent.velocityX = stepSize;
+                            agent.lastX = Math.min(agent.lastX + agent.velocityX, drawingCanvas.width);
+                            reward = 0.2;
+                            break;
+                        case 5: // Erase
+                            ctx.clearRect(agent.lastX - 10, agent.lastY - 10, 20, 20);
+                            reward = -0.5;
+                            break;
+                        case 6: // Change Opacity
+                            agent.opacity = Math.max(agent.opacity - 0.1, 0.1);
+                            reward = 0.1;
+                            break;
+                        case 7: // Change Shape
+                            const shapes = ['circle', 'square', 'triangle'];
+                            const currentShapeIndex = shapes.indexOf(agent.shape);
+                            const newShapeIndex = (currentShapeIndex + 1) % shapes.length;
+                            agent.changeShape(shapes[newShapeIndex]);
+                            reward = 0.1;
+                            break;
+                        case 8: // Change Color
+                            agent.changeColor(getRandomColor(0.6));
+                            reward = 0.1;
+                            break;
+                        case 9: // Increase Opacity
+                            agent.opacity = Math.min(agent.opacity + 0.1, 1.0);
+                            reward = 0.1;
+                            break;
+                        default:
+                            break;
+                    }
+
+                    // New state
+                    const nextState = [
+                        drawingCanvas.width,
+                        drawingCanvas.height,
+                        agent.lastX,
+                        agent.lastY,
+                        agent.velocityX,
+                        agent.velocityY
+                    ];
+
+                    // Advanced Reward Structure
+                    // Encourage diversity in shapes and colors
+                    if (shape !== 'circle') reward += 0.1;
+                    if (shape === 'triangle') reward += 0.2;
+
+                    // Reward based on proximity to center
+                    const centerX = drawingCanvas.width / 2;
+                    const centerY = drawingCanvas.height / 2;
+                    const distance = Math.hypot(agent.lastX - centerX, agent.lastY - centerY);
+                    reward += (drawingCanvas.width / 2 - distance) / (drawingCanvas.width / 2);
+
+                    // Encourage agents to cover more area
+                    const coverage = distance / (drawingCanvas.width / 2);
+                    reward += (1 - coverage) * 0.1;
+
+                    // Check if done
+                    if (distance < 15) {
+                        done = true;
+                        agent.lastX = drawingCanvas.width / 2;
+                        agent.lastY = drawingCanvas.height / 2;
+                        reward += 10;
+                    }
+
+                    // Remember experience
+                    agent.remember(state, action, reward, nextState, done);
+
+                    // Replay and learn
+                    await agent.replay();
+
+                    // Update epsilon display
+                    epsilonElement.textContent = agent.epsilon.toFixed(2);
+                }
+
+                // Update steps
+                steps += numberOfAgents;
+                stepsElement.textContent = steps;
+
+                // Update Trails for Visual Effect
+                updateTrails();
+            }
+
+            // Continue the loop
+            requestAnimationFrame(main);
+        }
+
+        /*********************
+         * Function to Draw Shapes
+         *********************/
+        function drawShape(shape, x, y, size) {
+            switch(shape) {
+                case 'circle':
+                    ctx.beginPath();
+                    ctx.arc(x, y, size, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+                case 'square':
+                    ctx.fillRect(x - size, y - size, size * 2, size * 2);
+                    break;
+                case 'triangle':
+                    ctx.beginPath();
+                    ctx.moveTo(x, y - size);
+                    ctx.lineTo(x + size, y + size);
+                    ctx.lineTo(x - size, y + size);
+                    ctx.closePath();
+                    ctx.fill();
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        /*********************
+         * Function to Update Trails
+         *********************/
+        function updateTrails() {
+            for (let i = trails.length - 1; i >= 0; i--) {
+                const trail = trails[i];
+                trail.alpha -= 0.02;
+                if (trail.alpha <= 0) {
+                    trails.splice(i, 1);
+                } else {
+                    ctx.fillStyle = `hsla(${hslFromColor(trail.color).h}, ${hslFromColor(trail.color).s}%, ${hslFromColor(trail.color).l}%, ${trail.alpha})`;
+                    ctx.globalAlpha = trail.alpha;
+                    drawShape(trail.shape, trail.x, trail.y, 8);
+                    ctx.globalAlpha = 1.0; // Reset alpha
+                }
+            }
+        }
+
+        /*********************
+         * Start the Main Loop
+         *********************/
+        main();
+
+    </script>
+</body>
+</html>
