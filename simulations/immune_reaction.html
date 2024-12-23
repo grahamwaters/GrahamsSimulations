@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Blood Cell and Pathogen Simulation</title>
+
+  <!-- D3.js Library -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #312e2e;
+    }
+
+    #control-panel {
+      padding: 10px 20px;
+      background: #333;
+      color: rgb(245, 234, 234);
+    }
+
+    #control-panel h1 {
+      margin: 0;
+      padding-bottom: 5px;
+      font-size: 20px;
+    }
+
+    #control-panel label {
+      margin-right: 10px;
+    }
+
+    #simulation-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-top: 20px;
+    }
+
+    .blood-cell {
+      stroke: none;
+    }
+
+    .rbc {
+      fill: #ff9999; /* Light red for RBC */
+    }
+
+    .wbc {
+      fill: #ffffff; /* White for WBC */
+      stroke: #ccc;  /* Light grey stroke to make them visible on white backgrounds */
+      stroke-width: 0.5;
+    }
+
+    .pathogen {
+      stroke: #333;
+      stroke-width: 1;
+      fill-opacity: 0.8;
+    }
+
+    /* Different colors for different pathogen types */
+    .bacteria {
+      fill: #66cc66;
+    }
+    .virus {
+      fill: #ffcc00;
+    }
+    .parasite {
+      fill: #cc66ff;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="control-panel">
+    <h1>Infection Simulation</h1>
+    <label for="pathogen-type">Pathogen Type:</label>
+    <select id="pathogen-type">
+      <option value="bacteria">Bacteria</option>
+      <option value="virus">Virus</option>
+      <option value="parasite">Parasite</option>
+    </select>
+    <button id="add-pathogen-btn">Add Pathogen</button>
+  </div>
+
+  <div id="simulation-container">
+    <!-- We will inject our SVG here via D3 -->
+  </div>
+
+  <script>
+    /*****************************************************************
+     * Configuration
+     *****************************************************************/
+    const width = 800;
+    const height = 600;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const trackRadius = 200;  // radius of the circular “track”
+
+    // Number of Red Blood Cells and White Blood Cells to start with
+    const RBC_COUNT = 25;
+    const WBC_COUNT = 5;
+
+    // Speeds (in degrees per second) and other constants
+    const RBC_SPEED_MIN = 0.5;
+    const RBC_SPEED_MAX = 2.0;
+    const WBC_SPEED_MIN = 1.0;
+    const WBC_SPEED_MAX = 2.5;
+
+    // Pathogen speeds by type (degrees per second)
+    const PATHOGEN_SPEED = {
+      bacteria: 1.0,
+      virus: 1.5,
+      parasite: 0.8
+    };
+
+    // Collision thresholds
+    const WBC_PATHOGEN_COLLISION_DISTANCE = 15; // If WBC is this close to a pathogen, it will neutralize it
+
+    /*****************************************************************
+     * Data structures
+     *****************************************************************/
+    let rbcData = [];
+    let wbcData = [];
+    let pathogenData = [];
+
+    /*****************************************************************
+     * Initialize the SVG
+     *****************************************************************/
+    const svg = d3.select("#simulation-container")
+      .append("svg")
+      .attr("width", width)
+      .attr("height", height);
+
+    /*****************************************************************
+     * Create the circular “track” (just a visual circle)
+     *****************************************************************/
+    svg.append("circle")
+       .attr("cx", centerX)
+       .attr("cy", centerY)
+       .attr("r", trackRadius)
+       .attr("fill", "none")
+       .attr("stroke", "#aaa")
+       .attr("stroke-width", 1.5);
+
+    /*****************************************************************
+     * Initialize RBCs and WBCs with random angles & speeds
+     *****************************************************************/
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    for (let i = 0; i < RBC_COUNT; i++) {
+      rbcData.push({
+        angle: Math.random() * 360,
+        speed: randomInRange(RBC_SPEED_MIN, RBC_SPEED_MAX)  // degrees per second
+      });
+    }
+
+    for (let i = 0; i < WBC_COUNT; i++) {
+      wbcData.push({
+        angle: Math.random() * 360,
+        speed: randomInRange(WBC_SPEED_MIN, WBC_SPEED_MAX)
+      });
+    }
+
+    /*****************************************************************
+     * Create the D3 selections for RBCs, WBCs, and Pathogens
+     *****************************************************************/
+    let rbcSelection = svg.selectAll(".rbc")
+      .data(rbcData)
+      .enter()
+      .append("circle")
+      .attr("class", "blood-cell rbc")
+      .attr("r", 5);
+
+    let wbcSelection = svg.selectAll(".wbc")
+      .data(wbcData)
+      .enter()
+      .append("circle")
+      .attr("class", "blood-cell wbc")
+      .attr("r", 6);
+
+    // Pathogens will be dynamically added, so initially empty
+    let pathogenSelection = svg.selectAll(".pathogen");
+
+    /*****************************************************************
+     * Helper functions
+     *****************************************************************/
+
+    // Convert polar (angle) to Cartesian for a given radius
+    function polarToCartesian(angle, radius) {
+      const rad = angle * (Math.PI / 180);
+      return {
+        x: centerX + radius * Math.cos(rad),
+        y: centerY + radius * Math.sin(rad)
+      };
+    }
+
+    // Distance between two points
+    function distance(p1, p2) {
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+
+    /*****************************************************************
+     * Main update function (called on every tick)
+     *****************************************************************/
+    const fps = 60;
+    const dt = 1 / fps; // time step in seconds
+    const degreesPerFrame = 1; // We’ll factor in each object's own speed
+
+    function tick() {
+      // Update angles
+      rbcData.forEach(d => {
+        d.angle = (d.angle + d.speed) % 360;
+      });
+      wbcData.forEach(d => {
+        d.angle = (d.angle + d.speed) % 360;
+      });
+      pathogenData.forEach(d => {
+        d.angle = (d.angle + d.speed) % 360;
+      });
+
+      // Collision detection (WBC vs Pathogen)
+      // If distance < threshold, remove pathogen
+      for (let w = 0; w < wbcData.length; w++) {
+        const wbc = wbcData[w];
+        const wbcPos = polarToCartesian(wbc.angle, trackRadius);
+
+        // Check each pathogen
+        for (let p = pathogenData.length - 1; p >= 0; p--) {
+          const pathogen = pathogenData[p];
+          const pathogenPos = polarToCartesian(pathogen.angle, trackRadius);
+
+          if (distance(wbcPos, pathogenPos) < WBC_PATHOGEN_COLLISION_DISTANCE) {
+            // Remove pathogen from array
+            pathogenData.splice(p, 1);
+          }
+        }
+      }
+
+      // Re-bind pathogen data to selection (in case some are removed)
+      pathogenSelection = pathogenSelection
+        .data(pathogenData, d => d.id);
+
+      // Remove exiting (neutralized) pathogens
+      pathogenSelection.exit().remove();
+
+      // Reposition RBCs
+      rbcSelection
+        .attr("cx", d => polarToCartesian(d.angle, trackRadius).x)
+        .attr("cy", d => polarToCartesian(d.angle, trackRadius).y);
+
+      // Reposition WBCs
+      wbcSelection
+        .attr("cx", d => polarToCartesian(d.angle, trackRadius).x)
+        .attr("cy", d => polarToCartesian(d.angle, trackRadius).y);
+
+      // Reposition Pathogens
+      pathogenSelection
+        .attr("cx", d => polarToCartesian(d.angle, trackRadius).x)
+        .attr("cy", d => polarToCartesian(d.angle, trackRadius).y);
+    }
+
+    /*****************************************************************
+     * Add Pathogen button logic
+     *****************************************************************/
+    document.getElementById("add-pathogen-btn").addEventListener("click", function() {
+      const typeSelect = document.getElementById("pathogen-type");
+      const pathogenType = typeSelect.value;
+
+      // Create a new pathogen object
+      const newPathogen = {
+        id: Date.now() + "-" + Math.floor(Math.random()*1000),  // unique-ish ID
+        angle: Math.random() * 360,
+        speed: PATHOGEN_SPEED[pathogenType],
+        type: pathogenType
+      };
+
+      pathogenData.push(newPathogen);
+
+      // Re-bind data
+      pathogenSelection = svg.selectAll(".pathogen")
+        .data(pathogenData, d => d.id);
+
+      // Enter new pathogens
+      pathogenSelection.enter()
+        .append("circle")
+        .attr("class", d => `pathogen ${d.type}`)
+        .attr("r", 8)
+        .attr("cx", d => polarToCartesian(d.angle, trackRadius).x)
+        .attr("cy", d => polarToCartesian(d.angle, trackRadius).y);
+    });
+
+    /*****************************************************************
+     * Start the simulation
+     *****************************************************************/
+    d3.timer(tick, 1000 / fps);
+  </script>
+
+</body>
+</html>
