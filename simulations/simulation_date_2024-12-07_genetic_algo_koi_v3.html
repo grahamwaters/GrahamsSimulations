@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Koi Evolution Simulation</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #0a150f;
+        font-family: sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100vh;
+      }
+
+      #controlPanel {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        z-index: 999;
+        max-width: 250px;
+      }
+
+      #scoreboard {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-height: 200px;
+        background: rgba(255, 255, 255, 0.9);
+        overflow-y: auto;
+        font-size: 12px;
+        z-index: 998;
+        border-top: 1px solid #ccc;
+        display: none;
+      }
+
+      #scoreboard table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      #scoreboard th,
+      #scoreboard td {
+        text-align: left;
+        padding: 5px;
+        border-bottom: 1px solid #ccc;
+      }
+
+      #infoPanel {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        z-index: 1000;
+      }
+
+      #infoPanel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      #toggleScoreboardBtn,
+      #toggleHungerBtn {
+        position: absolute;
+        bottom: 210px;
+        left: 10px;
+        z-index: 1001;
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid #ccc;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        border-radius: 3px;
+        margin-top: 5px;
+      }
+
+      #toggleHungerBtn {
+        bottom: 240px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="simulationCanvas"></canvas>
+
+    <div id="infoPanel">
+      <h2>Info</h2>
+      <div>Epoch: <span id="epochDisplay">0</span></div>
+      <div>
+        Alive Fish: <span id="aliveDisplay">0</span>/<span
+          id="totalFish"
+        ></span>
+      </div>
+      <div>Food Count: <span id="foodCount"></span></div>
+      <div>Snapping Turtles: <span id="turtleCount">0</span></div>
+    </div>
+
+    <div id="controlPanel">
+      <label
+        >Epoch Duration:
+        <input
+          type="number"
+          id="stepsPerEpoch"
+          min="100"
+          step="100"
+          value="2000" /></label
+      ><br />
+      <label
+        >Learning Rate:
+        <input
+          type="number"
+          id="learningRate"
+          step="0.001"
+          value="0.01" /></label
+      ><br />
+      <label
+        >Epsilon (Predator):
+        <input type="number" id="epsilon" step="0.01" value="0.1" /></label
+      ><br />
+      <label
+        >Food Gen Interval:
+        <input type="number" id="foodInterval" min="10" value="100" /></label
+      ><br />
+      <label
+        >Current Strength:
+        <input
+          type="range"
+          id="currentStrength"
+          min="0"
+          max="0.01"
+          step="0.0001"
+          value="0.001" /></label
+      ><br /><br />
+
+      <!-- Existing controls -->
+      <label
+        >Max Speed:
+        <input
+          type="range"
+          id="maxSpeed"
+          min="0.1"
+          max="3"
+          step="0.1"
+          value="1" /></label
+      ><br />
+      <label
+        >Max Force:
+        <input
+          type="range"
+          id="maxForce"
+          min="0.01"
+          max="0.5"
+          step="0.01"
+          value="0.05" /></label
+      ><br />
+      <label
+        >Separation Weight:
+        <input
+          type="range"
+          id="sepWeight"
+          min="0"
+          max="5"
+          step="0.1"
+          value="0.5" /></label
+      ><br />
+      <label
+        >Alignment Weight:
+        <input
+          type="range"
+          id="alignWeight"
+          min="0"
+          max="5"
+          step="0.1"
+          value="1.0" /></label
+      ><br />
+      <label
+        >Cohesion Weight:
+        <input
+          type="range"
+          id="cohWeight"
+          min="0"
+          max="5"
+          step="0.1"
+          value="0.5"
+      /></label>
+    </div>
+
+    <button id="toggleHungerBtn">Hide Hunger</button>
+    <button id="toggleScoreboardBtn">Show Data Table</button>
+
+    <div id="scoreboard">
+      <table>
+        <thead>
+          <tr>
+            <th>Fish ID</th>
+            <th>Color</th>
+            <th>Epochs Survived</th>
+            <th>Food Eaten</th>
+            <th>Hunger</th>
+            <th>Energy</th>
+            <th>Experience</th>
+            <th>Health</th>
+            <th>Boldness</th>
+            <th>Wisdom</th>
+            <th>Learning %</th>
+          </tr>
+        </thead>
+        <tbody id="scoreboardBody"></tbody>
+      </table>
+    </div>
+
+    <script>
+      // Global parameters and variables
+      let epsilon = 0.1; // epsilon for predator strategy
+      const canvas = document.getElementById("simulationCanvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      let sizeFactor = 30; // Helps determine how many agents (fish) to spawn.
+
+      function randomInRange(min, max) {
+        return Math.random() * (max - min) + min;
+      }
+
+      function pointInPolygon(point, polygon) {
+        let { x, y } = point;
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const xi = polygon[i].x,
+            yi = polygon[i].y;
+          const xj = polygon[j].x,
+            yj = polygon[j].y;
+          const intersect =
+            yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      const params = {
+        pondRadius: Math.min(canvas.width, canvas.height) / 3 + sizeFactor,
+        pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
+        fishCount: sizeFactor - 12,
+        maxSpeed: 0.2,
+        maxForce: 0.05,
+        perceptionRadius: 20,
+        separationDistance: 10,
+        edgeBuffer: 20,
+        islandRepelRadius: 70,
+        islandRepelForce: 0.2,
+        edgeRepelForce: 0.1,
+        separationWeight: 0.5,
+        alignmentWeight: 1.0,
+        cohesionWeight: 0.5,
+        currentStrength: 0.001,
+        currentRandomness: 0.25,
+        islandCount: 2, // This is half the actual number for some reason.
+        fishBaseColor: 30,
+        fishMaxHunger: 1.0,
+        hungerDecreaseRate: 0.0001,
+        edgeDangerMultiplier: 2.0,
+        foodSpawnInterval: 20, // Was 100
+        foodRestoreAmount: 0.5, // How much hp eating food will restore.
+        stepsPerEpoch: 200, // Was 2000
+        learningRate: 0.02,
+        w_alignment: 1.0,
+        w_cohesion: 0.5,
+        w_separation: 0.5,
+        predatorSpeed: 0.8, // Moves at 80% of the speed of the fish.
+        predatorMaxForce: 0.04,
+        turtleSpeed: 0.4, // Slower than predator
+        turtleMaxForce: 0.02,
+        showHunger: true,
+        reefDotSize: 2,
+        plantCount: Math.floor(sizeFactor * 0.25), // 25% of fishCount
+        plantColor: "#228B22",
+        // Damage parameters
+        damageIsland: 0.009,
+        damagePredator: 0.01, // Increased
+        damageTurtle: 0.005, // Damage from turtle
+        damageOvercrowd: 0.08, // Increased it was 0.01
+      };
+
+      const fishArray = [];
+      const islands = [];
+      const foods = [];
+      const reefDots = [];
+      const forest = []; // Array to hold tree data
+      const plants = []; // Aquatic plants
+      const turtles = []; // Snapping turtles
+
+      let stepCount = 0;
+      let epochCount = 0;
+      let globalTime = 0;
+      let cumulativeReward = 0;
+      let fishIDCounter = 1;
+      let predator;
+
+      // Generate dynamic water gradient to simulate depth
+      function drawWaterGradient() {
+        const gradient = ctx.createRadialGradient(
+          params.pondCenter.x,
+          params.pondCenter.y,
+          params.pondRadius * 0.5,
+          params.pondCenter.x,
+          params.pondCenter.y,
+          params.pondRadius
+        );
+        gradient.addColorStop(0, "#00aaff"); // Shallow
+        gradient.addColorStop(1, "#003366"); // Deep
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(params.pondCenter.x, params.pondCenter.y, params.pondRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function generateLake() {
+        const points = [];
+        for (let angle = 0; angle < 360; angle += 5) {
+          const rad = (Math.PI / 180) * angle;
+          const radius = params.pondRadius + randomInRange(-30, 30);
+          const x = params.pondCenter.x + radius * Math.cos(rad);
+          const y = params.pondCenter.y + radius * Math.sin(rad);
+          points.push({ x, y });
+        }
+        return points;
+      }
+      const lakeOutline = generateLake();
+
+      function drawPond() {
+        drawWaterGradient();
+        // Additional pond details can be added here if needed
+      }
+
+      function islandsOverlap(x, y, size) {
+        for (let points of islands) {
+          let cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+          let cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+          let dx = cx - x;
+          let dy = cy - y;
+          let dist = Math.hypot(dx, dy);
+          if (dist < size * 2) return true;
+        }
+        return false;
+      }
+
+      function generateIslands(count) {
+        let attempts = 0;
+        for (let i = 0; i < count; i++) {
+          let islandPoints;
+          let islandCenter;
+          let size;
+          let valid = false;
+          while (!valid && attempts < 1000) {
+            attempts++;
+            islandCenter = {
+              x: randomInRange(
+                params.pondCenter.x - params.pondRadius / 2,
+                params.pondCenter.x + params.pondRadius / 2
+              ),
+              y: randomInRange(
+                params.pondCenter.y - params.pondRadius / 2,
+                params.pondCenter.y + params.pondRadius / 2
+              ),
+            };
+            size = randomInRange(40, 70);
+            if (islandsOverlap(islandCenter.x, islandCenter.y, size)) continue;
+
+            islandPoints = [];
+            for (let angle = 0; angle < 360; angle += 20) {
+              const rad = (Math.PI / 180) * angle;
+              const radius = size + randomInRange(-15, 15);
+              const x = islandCenter.x + Math.cos(rad) * radius;
+              const y = islandCenter.y + Math.sin(rad) * radius;
+              islandPoints.push({ x, y });
+            }
+            valid = true;
+          }
+          if (valid) islands.push(islandPoints);
+          else break;
+        }
+      }
+
+      function generateForest() {
+        const treeCount = 300; // Total number of trees
+        for (let i = 0; i < treeCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const radius = params.pondRadius + 100 + Math.random() * 300;
+          const x = params.pondCenter.x + Math.cos(angle) * radius;
+          const y = params.pondCenter.y + Math.sin(angle) * radius;
+
+          if (Math.random() < 0.05) continue; // 5% chance to skip tree for clearings
+
+          const treeSize = 3 + Math.random() * 3; // Tree size between 3 and 6
+          // Generate a varying shade of green for the canopy
+          const hue = randomInRange(100, 140); // Hue between 100 and 140 for green shades
+          const saturation = randomInRange(60, 100); // Saturation between 60% and 100%
+          const lightness = randomInRange(30, 50); // Lightness between 30% and 50%
+          const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+
+          forest.push({ x, y, size: treeSize, color });
+        }
+      }
+
+      function drawIslands() {
+        islands.forEach((points) => {
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          points.forEach((point) => ctx.lineTo(point.x, point.y));
+          ctx.closePath();
+          ctx.fillStyle = "#8B4513"; // Brown color for islands
+          ctx.fill();
+          ctx.strokeStyle = "#FFFFFF";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        });
+      }
+
+      // Plant Class
+      class Plant {
+        constructor(x, y) {
+          this.position = { x, y };
+          this.size = randomInRange(10, 20);
+          this.color = "#228B22"; // Forest green
+          this.angleOffset = randomInRange(0, Math.PI * 2);
+          this.swaySpeed = randomInRange(0.01, 0.03);
+          this.swayAmplitude = randomInRange(0.5, 1.5);
+          this.currentAngle = 0;
+        }
+
+        update() {
+          // Swaying motion
+          this.currentAngle =
+            this.angleOffset + globalTime * this.swaySpeed;
+        }
+
+        draw() {
+          ctx.save();
+          ctx.translate(this.position.x, this.position.y);
+          ctx.rotate(Math.sin(this.currentAngle) * this.swayAmplitude);
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-this.size / 2, -this.size);
+          ctx.lineTo(this.size / 2, -this.size);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      // Generate Aquatic Plants
+      function generatePlants() {
+        const plantCount = Math.floor(params.plantCount);
+        for (let i = 0; i < plantCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const radius = randomInRange(params.pondRadius * 0.3, params.pondRadius * 0.9);
+          const x = params.pondCenter.x + Math.cos(angle) * radius;
+          const y = params.pondCenter.y + Math.sin(angle) * radius;
+          plants.push(new Plant(x, y));
+        }
+      }
+
+      function drawPlants() {
+        plants.forEach((plant) => {
+          plant.update();
+          plant.draw();
+        });
+      }
+
+      class Food {
+        constructor(x, y) {
+          this.position = { x, y };
+          this.size = 5;
+          this.vel = {
+            x: randomInRange(-0.1, 0.1),
+            y: randomInRange(-0.1, 0.1),
+          };
+        }
+
+        update() {
+          this.position.x += this.vel.x;
+          this.position.y += this.vel.y;
+
+          this.vel.x += randomInRange(-0.01, 0.01);
+          this.vel.y += randomInRange(-0.01, 0.01);
+
+          for (let island of islands) {
+            if (pointInPolygon(this.position, island)) {
+              let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+              let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+              let dx = this.position.x - cx;
+              let dy = this.position.y - cy;
+              let dist = Math.hypot(dx, dy);
+              if (dist === 0) {
+                dx = 1;
+                dist = 1;
+              }
+              dx /= dist;
+              dy /= dist;
+              this.position.x += dx * 2;
+              this.position.y += dy * 2;
+              this.vel.x += dx * 0.1;
+              this.vel.y += dy * 0.1;
+            }
+          }
+
+          const speed = Math.hypot(this.vel.x, this.vel.y);
+          if (speed > 0.2) {
+            this.vel.x = (this.vel.x / speed) * 0.2;
+            this.vel.y = (this.vel.y / speed) * 0.2;
+          }
+        }
+
+        draw() {
+          ctx.fillStyle = "yellow";
+          ctx.beginPath();
+          ctx.arc(this.position.x, this.position.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function spawnFoodOffCoast() {
+        if (islands.length === 0) return;
+        const island = islands[Math.floor(Math.random() * islands.length)];
+        const centerX = island.reduce((sum, p) => sum + p.x, 0) / island.length;
+        const centerY = island.reduce((sum, p) => sum + p.y, 0) / island.length;
+
+        let radiusSum = 0;
+        island.forEach((p) => {
+          radiusSum += Math.hypot(p.x - centerX, p.y - centerY);
+        });
+        const avgRadius = radiusSum / island.length;
+
+        const angle = Math.random() * 2 * Math.PI;
+        const foodRadius = avgRadius + randomInRange(10, 30);
+        const x = centerX + foodRadius * Math.cos(angle);
+        const y = centerY + foodRadius * Math.sin(angle);
+
+        foods.push(new Food(x, y));
+      }
+
+      function applySemiRandomHealthDecay(fish, fishArray) {
+        const ageFactor = fish.epochsSurvived * 0.0001 * Math.random();
+        let crowdedFactor = 0;
+        let closeCount = 0;
+        fishArray.forEach((other) => {
+          if (other !== fish && other.alive) {
+            const d = Math.hypot(
+              fish.position.x - other.position.x,
+              fish.position.y - other.position.y
+            );
+            if (d < params.separationDistance * 0.5) closeCount++;
+          }
+        });
+        if (closeCount > 3) {
+          crowdedFactor = (closeCount - 3) * 0.0005 * Math.random();
+        }
+
+        let islandFactor = 0;
+        for (let island of islands) {
+          let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+          let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+          const dist = Math.hypot(fish.position.x - cx, fish.position.y - cy);
+          const safeDistance = 50;
+          if (dist < safeDistance) {
+            islandFactor +=
+              ((safeDistance - dist) / safeDistance) * 0.0005 * Math.random();
+          }
+          if (pointInPolygon(fish.position, island)) {
+            islandFactor += 0.001 * Math.random();
+          }
+        }
+
+        const totalDecay = ageFactor + crowdedFactor + islandFactor;
+        fish.health -= totalDecay;
+      }
+
+      class Fish {
+        constructor() {
+          this.fishID = fishIDCounter++;
+          this.position = {
+            x:
+              params.pondCenter.x +
+              randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+            y:
+              params.pondCenter.y +
+              randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+          };
+          this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+          this.acceleration = { x: 0, y: 0 };
+          this.hunger = params.fishMaxHunger;
+          this.energy = 1.0; // New attribute
+          this.experience = 0; // New attribute
+          this.health = 1.0;
+          this.alive = true;
+          this.deathFade = 0;
+          this.epochsSurvived = 0;
+          this.foodEaten = 0;
+          this.baseHue = params.fishBaseColor;
+          this.bodyLength = 10;
+          this.bodyWidth = 4;
+          this.boldness = randomInRange(0.5, 1.5); // New attribute
+          this.wisdom = 0; // New attribute
+          this.genes = {
+            speed: randomInRange(0.5, 1.5),
+            force: randomInRange(0.02, 0.05),
+            health: randomInRange(0.8, 1.2),
+          };
+        }
+
+        static reproduce(parent1, parent2) {
+          const child = new Fish();
+          child.genes.speed = (parent1.genes.speed + parent2.genes.speed) / 2;
+          child.genes.force = (parent1.genes.force + parent2.genes.force) / 2;
+          child.genes.health =
+            (parent1.genes.health + parent2.genes.health) / 2;
+          // Mutation
+          child.genes.speed *= 1 + randomInRange(-0.1, 0.1);
+          child.genes.force *= 1 + randomInRange(-0.1, 0.1);
+          child.genes.health *= 1 + randomInRange(-0.1, 0.1);
+          // Inherit wisdom
+          child.wisdom = (parent1.wisdom + parent2.wisdom) / 2;
+          return child;
+        }
+
+        update(fishArray) {
+          if (this.alive) {
+            this.velocity.x += this.acceleration.x;
+            this.velocity.y += this.acceleration.y;
+
+            const speed = Math.hypot(this.velocity.x, this.velocity.y);
+            if (speed > this.genes.speed) {
+              this.velocity.x = (this.velocity.x / speed) * this.genes.speed;
+              this.velocity.y = (this.velocity.y / speed) * this.genes.speed;
+            }
+
+            this.position.x += this.velocity.x;
+            this.position.y += this.velocity.y;
+
+            this.acceleration.x = 0;
+            this.acceleration.y = 0;
+
+            this.decreaseHunger();
+            this.decreaseEnergy();
+            this.eatFood();
+            this.applyDamage(fishArray);
+            applySemiRandomHealthDecay(this, fishArray);
+
+            if (this.hunger <= 0 || this.health <= 0 || this.energy <= 0) {
+              this.alive = false;
+              addReefDot(this.position.x, this.position.y);
+            } else {
+              this.avoidEdges();
+              this.avoidIslands();
+            }
+          } else {
+            this.deathFade++;
+          }
+        }
+
+        applyDamage(fishArray) {
+          let damageThisFrame = 0;
+          // Island damage
+          for (let island of islands) {
+            if (pointInPolygon(this.position, island)) {
+              damageThisFrame += params.damageIsland;
+            }
+          }
+
+          // Predator damage
+          if (predator) {
+            const distPred = Math.hypot(
+              this.position.x - predator.position.x,
+              this.position.y - predator.position.y
+            );
+            if (distPred < 30) {
+              damageThisFrame += params.damagePredator;
+            }
+          }
+
+          // Turtle damage
+          turtles.forEach((turtle) => {
+            const distTurtle = Math.hypot(
+              this.position.x - turtle.position.x,
+              this.position.y - turtle.position.y
+            );
+            if (distTurtle < 20) {
+              damageThisFrame += params.damageTurtle;
+            }
+          });
+
+          // Overcrowding damage is partly considered in applySemiRandomHealthDecay, but let's keep major damage here:
+          let closeCount = 0;
+          fishArray.forEach((other) => {
+            if (other !== this && other.alive) {
+              const d = Math.hypot(
+                this.position.x - other.position.x,
+                this.position.y - other.position.y
+              );
+              if (d < params.separationDistance * 0.5) closeCount++;
+            }
+          });
+          if (closeCount > 3) {
+            damageThisFrame += params.damageOvercrowd;
+          }
+
+          if (damageThisFrame > 0) {
+            this.health -= damageThisFrame;
+            cumulativeReward -= damageThisFrame * 0.5;
+          }
+        }
+
+        decreaseHunger() {
+          if (this.isExploring()) {
+            // No hunger increase when exploring or still
+            return;
+          }
+          let decrease = params.hungerDecreaseRate;
+          const distToCenter = Math.hypot(
+            this.position.x - params.pondCenter.x,
+            this.position.y - params.pondCenter.y
+          );
+          if (distToCenter > params.pondRadius - params.edgeBuffer) {
+            decrease *= params.edgeDangerMultiplier;
+          }
+          this.hunger -= decrease;
+          if (this.hunger < 0) this.hunger = 0;
+        }
+
+        decreaseEnergy() {
+          if (!this.isExploring()) {
+            this.energy -= 0.001; // Energy decreases when not exploring
+            if (this.energy < 0) this.energy = 0;
+          }
+        }
+
+        isExploring() {
+          // Random chance to explore or stay still
+          return Math.random() < 0.1; // 10% chance each frame
+        }
+
+        eatFood() {
+          for (let i = foods.length - 1; i >= 0; i--) {
+            const f = foods[i];
+            const d = Math.hypot(
+              this.position.x - f.position.x,
+              this.position.y - f.position.y
+            );
+            if (d < 10) {
+              this.hunger = Math.min(
+                params.fishMaxHunger,
+                this.hunger + params.foodRestoreAmount
+              );
+              this.foodEaten++;
+              this.experience += 1; // Gain experience
+              cumulativeReward += 1;
+              foods.splice(i, 1);
+            }
+          }
+        }
+
+        applyBehaviors(fishArray) {
+          if (!this.alive) return;
+          const alignment = this.alignment(fishArray);
+          const cohesion = this.cohesion(fishArray);
+          const separation = this.separation(fishArray);
+          const foodSteer = this.seekFood();
+          const predAvoid = this.avoidPredator(predator);
+
+          // Random exploration behavior
+          let exploration = { x: 0, y: 0 };
+          if (this.isExploring()) {
+            const angle = Math.random() * 2 * Math.PI;
+            exploration = {
+              x: Math.cos(angle) * 0.05,
+              y: Math.sin(angle) * 0.05,
+            };
+          }
+
+          this.acceleration.x +=
+            alignment.x * params.w_alignment +
+            cohesion.x * params.w_cohesion +
+            separation.x * params.w_separation +
+            foodSteer.x * 1.0 +
+            predAvoid.x * 2.0 +
+            exploration.x;
+          this.acceleration.y +=
+            alignment.y * params.w_alignment +
+            cohesion.y * params.w_cohesion +
+            separation.y * params.w_separation +
+            foodSteer.y * 1.0 +
+            predAvoid.y * 2.0 +
+            exploration.y;
+
+          // Current (clockwise flow)
+          this.acceleration.x +=
+            ((-params.currentStrength +
+              randomInRange(
+                -params.currentRandomness,
+                params.currentRandomness
+              )) *
+              (this.position.y - params.pondCenter.y)) /
+            params.pondRadius;
+          this.acceleration.y +=
+            ((params.currentStrength +
+              randomInRange(
+                -params.currentRandomness,
+                params.currentRandomness
+              )) *
+              (this.position.x - params.pondCenter.x)) /
+            params.pondRadius;
+        }
+
+        avoidPredator(pred) {
+          if (!pred) return { x: 0, y: 0 };
+          const dist = Math.hypot(
+            this.position.x - pred.position.x,
+            this.position.y - pred.position.y
+          );
+          if (dist < params.perceptionRadius * 2) {
+            let steer = {
+              x: this.position.x - pred.position.x,
+              y: this.position.y - pred.position.y,
+            };
+            const mag = Math.hypot(steer.x, steer.y);
+            if (mag > 0) {
+              steer.x = (steer.x / mag) * this.genes.speed - this.velocity.x;
+              steer.y = (steer.y / mag) * this.genes.speed - this.velocity.y;
+            }
+            return steer;
+          }
+          return { x: 0, y: 0 };
+        }
+
+        seekFood() {
+          let nearestDist = Infinity;
+          let target = null;
+          for (let f of foods) {
+            const d = Math.hypot(
+              this.position.x - f.position.x,
+              this.position.y - f.position.y
+            );
+            if (d < nearestDist) {
+              nearestDist = d;
+              target = f;
+            }
+          }
+          if (target) {
+            const desired = {
+              x: target.position.x - this.position.x,
+              y: target.position.y - this.position.y,
+            };
+            const mag = Math.hypot(desired.x, desired.y);
+            if (mag > 0) {
+              desired.x = (desired.x / mag) * this.genes.speed;
+              desired.y = (desired.y / mag) * this.genes.speed;
+            }
+            const steer = {
+              x: desired.x - this.velocity.x,
+              y: desired.y - this.velocity.y,
+            };
+            const smag = Math.hypot(steer.x, steer.y);
+            if (smag > this.genes.force) {
+              steer.x = (steer.x / smag) * this.genes.force;
+              steer.y = (steer.y / smag) * this.genes.force;
+            }
+            return steer;
+          }
+          return { x: 0, y: 0 };
+        }
+
+        separation(fishArray) {
+          let steer = { x: 0, y: 0 };
+          let count = 0;
+          fishArray.forEach((other) => {
+            if (!other.alive || other === this) return;
+            const d = Math.hypot(
+              this.position.x - other.position.x,
+              this.position.y - other.position.y
+            );
+            if (d > 0 && d < params.separationDistance) {
+              const diff = {
+                x: this.position.x - other.position.x,
+                y: this.position.y - other.position.y,
+              };
+              const dist = Math.hypot(diff.x, diff.y);
+              diff.x /= dist;
+              diff.y /= dist;
+              steer.x += diff.x;
+              steer.y += diff.y;
+              count++;
+            }
+          });
+
+          if (count > 0) {
+            steer.x /= count;
+            steer.y /= count;
+          }
+
+          const mag = Math.hypot(steer.x, steer.y);
+          if (mag > 0) {
+            steer.x = (steer.x / mag) * this.genes.speed - this.velocity.x;
+            steer.y = (steer.y / mag) * this.genes.speed - this.velocity.y;
+          }
+          return steer;
+        }
+
+        avoidEdges() {
+          const distToCenter = Math.hypot(
+            this.position.x - params.pondCenter.x,
+            this.position.y - params.pondCenter.y
+          );
+          if (distToCenter > params.pondRadius - params.edgeBuffer) {
+            const angle = Math.atan2(
+              this.position.y - params.pondCenter.y,
+              this.position.x - params.pondCenter.x
+            );
+            const force =
+              (distToCenter - (params.pondRadius - params.edgeBuffer)) *
+              params.edgeRepelForce;
+            this.acceleration.x -= Math.cos(angle) * force;
+            this.acceleration.y -= Math.sin(angle) * force;
+          }
+        }
+
+        avoidIslands() {
+          for (let island of islands) {
+            let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+            let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+            const dx = this.position.x - cx;
+            const dy = this.position.y - cy;
+            const dist = Math.hypot(dx, dy);
+            const inside = pointInPolygon(this.position, island);
+
+            if (inside) {
+              let dirX = dx / dist;
+              let dirY = dy / dist;
+              const force = 0.5;
+              this.acceleration.x += dirX * force;
+              this.acceleration.y += dirY * force;
+            } else {
+              const safeDistance = 50;
+              if (dist < safeDistance) {
+                let dirX = dx / dist;
+                let dirY = dy / dist;
+                const proximity = (safeDistance - dist) / safeDistance;
+                const force = proximity * 0.1;
+                this.acceleration.x += dirX * force;
+                this.acceleration.y += dirY * force;
+              }
+            }
+          }
+        }
+
+        alignment(fishArray) {
+          let sum = { x: 0, y: 0 };
+          let count = 0;
+
+          fishArray.forEach((other) => {
+            if (!other.alive) return;
+            const d = Math.hypot(
+              this.position.x - other.position.x,
+              this.position.y - other.position.y
+            );
+            if (d > 0 && d < params.perceptionRadius) {
+              sum.x += other.velocity.x;
+              sum.y += other.velocity.y;
+              count++;
+            }
+          });
+
+          if (count > 0) {
+            sum.x /= count;
+            sum.y /= count;
+
+            const mag = Math.hypot(sum.x, sum.y);
+            if (mag > 0) {
+              sum.x = (sum.x / mag) * this.genes.speed;
+              sum.y = (sum.y / mag) * this.genes.speed;
+            }
+
+            const steer = {
+              x: sum.x - this.velocity.x,
+              y: sum.y - this.velocity.y,
+            };
+            const steerMag = Math.hypot(steer.x, steer.y);
+            if (steerMag > this.genes.force) {
+              steer.x = (steer.x / steerMag) * this.genes.force;
+              steer.y = (steer.y / steerMag) * this.genes.force;
+            }
+            return steer;
+          }
+
+          return { x: 0, y: 0 };
+        }
+
+        cohesion(fishArray) {
+          let sum = { x: 0, y: 0 };
+          let count = 0;
+
+          fishArray.forEach((other) => {
+            if (!other.alive) return;
+            const d = Math.hypot(
+              this.position.x - other.position.x,
+              this.position.y - other.position.y
+            );
+            if (d > 0 && d < params.perceptionRadius) {
+              sum.x += other.position.x;
+              sum.y += other.position.y;
+              count++;
+            }
+          });
+
+          if (count > 0) {
+            sum.x /= count;
+            sum.y /= count;
+
+            const desired = {
+              x: sum.x - this.position.x,
+              y: sum.y - this.position.y,
+            };
+            const mag = Math.hypot(desired.x, desired.y);
+            if (mag > 0) {
+              desired.x = (desired.x / mag) * this.genes.speed;
+              desired.y = (desired.y / mag) * this.genes.speed;
+            }
+
+            const steer = {
+              x: desired.x - this.velocity.x,
+              y: desired.y - this.velocity.y,
+            };
+            const steerMag = Math.hypot(steer.x, steer.y);
+            if (steerMag > this.genes.force) {
+              steer.x = (steer.x / steerMag) * this.genes.force;
+              steer.y = (steer.y / steerMag) * this.genes.force;
+            }
+            return steer;
+          }
+
+          return { x: 0, y: 0 };
+        }
+
+        draw() {
+          if (!this.alive) {
+            const fadeFactor = Math.min(this.deathFade / 200, 1);
+            ctx.save();
+            ctx.translate(this.position.x, this.position.y);
+            ctx.globalAlpha = 1 - fadeFactor;
+            ctx.fillStyle = "hsl(210,100%,20%)";
+            ctx.beginPath();
+            ctx.ellipse(
+              0,
+              0,
+              this.bodyLength,
+              this.bodyWidth,
+              0,
+              0,
+              2 * Math.PI
+            );
+            ctx.fill();
+
+            ctx.save();
+            ctx.translate(-this.bodyLength, 0);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(-10, 2);
+            ctx.lineTo(-10, -2);
+            ctx.closePath();
+            ctx.fillStyle = "hsl(210,100%,15%)";
+            ctx.fill();
+            ctx.restore();
+
+            ctx.save();
+            ctx.translate(-3, 0);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(-7, -2);
+            ctx.lineTo(-7, -6);
+            ctx.closePath();
+            ctx.fillStyle = "rgba(100,100,255,0.8)";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(-7, 2);
+            ctx.lineTo(-7, 6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+            ctx.restore();
+            return;
+          }
+
+          const tailAngle = Math.sin(globalTime * 0.2 + this.fishID) * 0.5;
+          const finAngle = Math.sin(globalTime * 0.4 + this.fishID) * 0.3;
+          let hue = this.baseHue + this.epochsSurvived * 40;
+
+          ctx.save();
+          ctx.translate(this.position.x, this.position.y);
+          ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+          ctx.fillStyle = `hsl(${hue},100%,50%)`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, this.bodyLength, this.bodyWidth, 0, 0, 2 * Math.PI);
+          ctx.fill();
+
+          // Tail
+          ctx.save();
+          ctx.translate(-this.bodyLength, 0);
+          ctx.rotate(tailAngle);
+          ctx.fillStyle = `hsl(${hue},100%,40%)`;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-10, 2);
+          ctx.lineTo(-10, -2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+
+          // Longer fins
+          ctx.save();
+          ctx.translate(-3, 0);
+          // Top fin
+          ctx.save();
+          ctx.rotate(-Math.PI / 2 + finAngle);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-7, -2);
+          ctx.lineTo(-7, -6);
+          ctx.closePath();
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.fill();
+          ctx.restore();
+          // Bottom fin
+          ctx.save();
+          ctx.rotate(Math.PI / 2 - finAngle);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-7, 2);
+          ctx.lineTo(-7, 6);
+          ctx.closePath();
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.fill();
+          ctx.restore();
+          ctx.restore();
+
+          ctx.restore();
+
+          if (params.showHunger) {
+            ctx.fillStyle = "white";
+            ctx.font = "10px sans-serif";
+            ctx.fillText(
+              `H:${this.hunger.toFixed(2)} E:${this.energy.toFixed(2)}`,
+              this.position.x + 5,
+              this.position.y - 5
+            );
+          }
+        }
+      }
+
+      class Predator {
+        constructor() {
+          this.position = {
+            x: params.pondCenter.x,
+            y: params.pondCenter.y,
+          };
+          this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+          this.acceleration = { x: 0, y: 0 };
+          // Predator could also have genes and evolve similarly if desired
+        }
+
+        update(fishArray) {
+          // Epsilon-greedy: with probability epsilon, random direction; else target
+          let targetVec;
+          if (Math.random() < epsilon) {
+            // random direction
+            const angle = Math.random() * 2 * Math.PI;
+            targetVec = { x: Math.cos(angle), y: Math.sin(angle) };
+          } else {
+            // choose target based on fish distribution
+            targetVec = this.huntTarget(fishArray);
+          }
+
+          this.acceleration.x = targetVec.x * params.predatorMaxForce;
+          this.acceleration.y = targetVec.y * params.predatorMaxForce;
+
+          // Avoid islands
+          for (let island of islands) {
+            let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+            let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+            const dx = this.position.x - cx;
+            const dy = this.position.y - cy;
+            const dist = Math.hypot(dx, dy);
+            const safeDist = 70;
+            if (pointInPolygon(this.position, island)) {
+              let dirX = dx / dist;
+              let dirY = dy / dist;
+              this.acceleration.x += dirX * 0.5;
+              this.acceleration.y += dirY * 0.5;
+            } else if (dist < safeDist) {
+              let dirX = dx / dist;
+              let dirY = dy / dist;
+              const prox = (safeDist - dist) / safeDist;
+              this.acceleration.x += dirX * (prox * 0.1);
+              this.acceleration.y += dirY * (prox * 0.1);
+            }
+          }
+
+          // Update predator position
+          this.velocity.x += this.acceleration.x;
+          this.velocity.y += this.acceleration.y;
+
+          const speed = Math.hypot(this.velocity.x, this.velocity.y);
+          if (speed > params.predatorSpeed) {
+            this.velocity.x = (this.velocity.x / speed) * params.predatorSpeed;
+            this.velocity.y = (this.velocity.y / speed) * params.predatorSpeed;
+          }
+
+          this.position.x += this.velocity.x;
+          this.position.y += this.velocity.y;
+
+          this.acceleration.x = 0;
+          this.acceleration.y = 0;
+
+          // Avoid leaving pond
+          const distToCenter = Math.hypot(
+            this.position.x - params.pondCenter.x,
+            this.position.y - params.pondCenter.y
+          );
+          if (distToCenter > params.pondRadius) {
+            const angle = Math.atan2(
+              this.position.y - params.pondCenter.y,
+              this.position.x - params.pondCenter.x
+            );
+            this.velocity.x = -Math.cos(angle) * 0.5;
+            this.velocity.y = -Math.sin(angle) * 0.5;
+          }
+        }
+
+        huntTarget(fishArray) {
+          // 1. Target Closest Fish:
+          let closestFish = null;
+          let closestDist = Infinity;
+          fishArray.forEach((f) => {
+            if (f.alive) {
+              const dist = Math.hypot(
+                this.position.x - f.position.x,
+                this.position.y - f.position.y
+              );
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestFish = f;
+              }
+            }
+          });
+
+          // 2. Target Weakest Fish:
+          let weakestFish = null;
+          let lowestHealth = Infinity;
+          fishArray.forEach((f) => {
+            if (f.alive && f.health < lowestHealth) {
+              lowestHealth = f.health;
+              weakestFish = f;
+            }
+          });
+
+          // 3. Ambush near Island:
+          let ambushTarget = null;
+          if (Math.random() < 0.2) {
+            // 20% chance to ambush
+            let closestIsland = null;
+            let closestDist = Infinity;
+            for (let island of islands) {
+              let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+              let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+              const dist = Math.hypot(this.position.x - cx, this.position.y - cy);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestIsland = island;
+              }
+            }
+            if (closestIsland) {
+              // Find a point near the island to ambush:
+              let cx = closestIsland.reduce((s, p) => s + p.x, 0) / closestIsland.length;
+              let cy = closestIsland.reduce((s, p) => s + p.y, 0) / closestIsland.length;
+              let angle = Math.random() * 2 * Math.PI;
+              let radius = closestDist / 2; // Ambush halfway to the island
+              ambushTarget = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+            }
+          }
+
+          // 4. Track Average Fish Position (with momentum):
+          let avgPos = { x: 0, y: 0 };
+          let count = 0;
+          fishArray.forEach((f) => {
+            if (f.alive) {
+              avgPos.x += f.position.x;
+              avgPos.y += f.position.y;
+              count++;
+            }
+          });
+          if (count > 0) {
+            avgPos.x /= count;
+            avgPos.y /= count;
+          }
+          // Add momentum to average position tracking:
+          if (!this.previousAvgPos) this.previousAvgPos = avgPos;
+          const momentum = 0.8; // Adjust this value to control momentum
+          avgPos.x = this.previousAvgPos.x * momentum + avgPos.x * (1 - momentum);
+          avgPos.y = this.previousAvgPos.y * momentum + avgPos.y * (1 - momentum);
+          this.previousAvgPos = avgPos;
+
+          // Adaptive Learning (Simplified):
+          // Keep track of success with each strategy:
+          if (!this.huntSuccess)
+            this.huntSuccess = { closest: 0, weakest: 0, ambush: 0, average: 0 };
+
+          // Choose target based on current success rates:
+          let target = null;
+          let strategy = "average"; // Default strategy
+          const successThreshold = 5; // Adjust this to control how quickly the predator adapts
+
+          if (this.huntSuccess.closest > successThreshold && closestFish) {
+            target = closestFish.position;
+            strategy = "closest";
+          } else if (this.huntSuccess.weakest > successThreshold && weakestFish) {
+            target = weakestFish.position;
+            strategy = "weakest";
+          } else if (this.huntSuccess.ambush > successThreshold && ambushTarget) {
+            target = ambushTarget;
+            strategy = "ambush";
+          } else {
+            target = avgPos;
+          }
+
+          // Update success rate (simplified - refine based on actual hunting success):
+          const distToTarget = Math.hypot(this.position.x - target.x, this.position.y - target.y);
+          if (distToTarget < 50) {
+            this.huntSuccess[strategy]++;
+          }
+
+          // Calculate direction vector:
+          const dirX = target.x - this.position.x;
+          const dirY = target.y - this.position.y;
+          const mag = Math.hypot(dirX, dirY);
+          if (mag > 0) return { x: dirX / mag, y: dirY / mag };
+          else return { x: 0, y: 0 };
+        }
+
+        draw() {
+          // Draw predator as a larger, red version of the other fish
+          ctx.save();
+          ctx.translate(this.position.x, this.position.y);
+          ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+          const bodyLength = 20; // Larger than regular fish
+          const bodyWidth = 6; // Wider than regular fish
+
+          // Color change based on hunting mode:
+          let predatorColor = "red"; // Default color
+          if (this.huntSuccess) {
+            if (this.huntSuccess.closest > 5) {
+              predatorColor = "blue"; // Closest fish
+            } else if (this.huntSuccess.weakest > 5) {
+              predatorColor = "green"; // Weakest fish
+            } else if (this.huntSuccess.ambush > 5) {
+              predatorColor = "purple"; // Ambush
+            } // Average fish remains red
+          }
+
+          // Apply the color:
+          ctx.fillStyle = predatorColor;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, bodyLength, bodyWidth, 0, 0, 2 * Math.PI);
+          ctx.fill();
+
+          // Tail
+          const tailAngle = Math.sin(globalTime * 0.2 + 1) * 0.5; // Using a fixed ID for the predator
+          ctx.save();
+          ctx.translate(-bodyLength, 0);
+          ctx.rotate(tailAngle);
+          ctx.fillStyle = "darkred"; // Darker red for the tail
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-15, 3); // Longer tail
+          ctx.lineTo(-15, -3);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+
+          // Fins
+          const finAngle = Math.sin(globalTime * 0.4 + 1) * 0.3; // Fixed ID for the predator
+          ctx.save();
+          ctx.translate(-5, 0); // Fins positioned slightly back
+          // Top fin
+          ctx.save();
+          ctx.rotate(-Math.PI / 2 + finAngle);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-10, -3); // Longer fins
+          ctx.lineTo(-10, -8);
+          ctx.closePath();
+          ctx.fillStyle = "rgba(255, 100, 100, 0.8)"; // Slightly red-tinted fins
+          ctx.fill();
+          ctx.restore();
+          // Bottom fin
+          ctx.save();
+          ctx.rotate(Math.PI / 2 - finAngle);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-10, 3);
+          ctx.lineTo(-10, 8);
+          ctx.closePath();
+          ctx.fillStyle = "rgba(255, 100, 100, 0.8)";
+          ctx.fill();
+          ctx.restore();
+          ctx.restore();
+
+          ctx.restore();
+        }
+      }
+
+      class Turtle {
+        constructor() {
+          this.position = {
+            x: params.pondCenter.x,
+            y: params.pondCenter.y,
+          };
+          this.velocity = { x: randomInRange(-0.5, 0.5), y: randomInRange(-0.5, 0.5) };
+          this.acceleration = { x: 0, y: 0 };
+          this.size = 8; // Smaller than predator
+          this.health = 1.0;
+          this.alive = true;
+        }
+
+        update(fishArray) {
+          // Simple behavior: move slowly towards nearest fish
+          let closestFish = null;
+          let closestDist = Infinity;
+          fishArray.forEach((f) => {
+            if (f.alive) {
+              const dist = Math.hypot(
+                this.position.x - f.position.x,
+                this.position.y - f.position.y
+              );
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestFish = f;
+              }
+            }
+          });
+
+          if (closestFish) {
+            const desired = {
+              x: closestFish.position.x - this.position.x,
+              y: closestFish.position.y - this.position.y,
+            };
+            const mag = Math.hypot(desired.x, desired.y);
+            if (mag > 0) {
+              desired.x = (desired.x / mag) * 0.3; // Turtle speed
+              desired.y = (desired.y / mag) * 0.3;
+            }
+            const steer = {
+              x: desired.x - this.velocity.x,
+              y: desired.y - this.velocity.y,
+            };
+            const smag = Math.hypot(steer.x, steer.y);
+            if (smag > params.turtleMaxForce) {
+              steer.x = (steer.x / smag) * params.turtleMaxForce;
+              steer.y = (steer.y / smag) * params.turtleMaxForce;
+            }
+            this.acceleration.x += steer.x;
+            this.acceleration.y += steer.y;
+          }
+
+          // Update position
+          this.velocity.x += this.acceleration.x;
+          this.velocity.y += this.acceleration.y;
+
+          const speed = Math.hypot(this.velocity.x, this.velocity.y);
+          if (speed > params.turtleSpeed) {
+            this.velocity.x = (this.velocity.x / speed) * params.turtleSpeed;
+            this.velocity.y = (this.velocity.y / speed) * params.turtleSpeed;
+          }
+
+          this.position.x += this.velocity.x;
+          this.position.y += this.velocity.y;
+
+          this.acceleration.x = 0;
+          this.acceleration.y = 0;
+
+          // Avoid leaving pond
+          const distToCenter = Math.hypot(
+            this.position.x - params.pondCenter.x,
+            this.position.y - params.pondCenter.y
+          );
+          if (distToCenter > params.pondRadius) {
+            const angle = Math.atan2(
+              this.position.y - params.pondCenter.y,
+              this.position.x - params.pondCenter.x
+            );
+            this.velocity.x = -Math.cos(angle) * 0.2;
+            this.velocity.y = -Math.sin(angle) * 0.2;
+          }
+
+          // Check for collision with fish
+          fishArray.forEach((fish) => {
+            if (fish.alive) {
+              const dist = Math.hypot(
+                this.position.x - fish.position.x,
+                this.position.y - fish.position.y
+              );
+              if (dist < this.size + fish.bodyLength) {
+                fish.alive = false;
+                addReefDot(fish.position.x, fish.position.y);
+                this.health -= 0.1; // Turtle loses health when eating
+              }
+            }
+          });
+
+          // Turtle health decay
+          this.health -= 0.00005; // Slow health decay
+          if (this.health <= 0) this.alive = false;
+        }
+
+        draw() {
+          if (!this.alive) return;
+
+          ctx.save();
+          ctx.translate(this.position.x, this.position.y);
+          ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+          // Draw turtle body
+          ctx.fillStyle = "olive";
+          ctx.beginPath();
+          ctx.ellipse(0, 0, this.size, this.size / 2, 0, 0, 2 * Math.PI);
+          ctx.fill();
+
+          // Draw turtle head
+          ctx.fillStyle = "darkolivegreen";
+          ctx.beginPath();
+          ctx.arc(this.size, 0, this.size / 2, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Draw turtle legs
+          ctx.fillStyle = "olive";
+          ctx.beginPath();
+          ctx.rect(-this.size, -this.size / 2, this.size / 2, this.size / 2);
+          ctx.rect(-this.size, this.size / 2 - this.size / 2, this.size / 2, this.size / 2);
+          ctx.rect(this.size / 2, -this.size / 2, this.size / 2, this.size / 2);
+          ctx.rect(this.size / 2, this.size / 2 - this.size / 2, this.size / 2, this.size / 2);
+          ctx.fill();
+
+          ctx.restore();
+        }
+      }
+
+      generateLake();
+      generateIslands(params.islandCount);
+      generateForest(); // Generate the forest once
+      generatePlants(); // Generate aquatic plants
+
+      for (let i = 0; i < params.fishCount; i++) {
+        fishArray.push(new Fish());
+      }
+
+      predator = new Predator();
+      turtles.push(new Turtle()); // Add initial snapping turtle
+
+      function animate() {
+        globalTime += 1;
+        stepCount++;
+
+        // Read controls:
+        params.stepsPerEpoch = parseInt(
+          document.getElementById("stepsPerEpoch").value
+        );
+        params.learningRate = parseFloat(
+          document.getElementById("learningRate").value
+        );
+        epsilon = parseFloat(document.getElementById("epsilon").value);
+        params.foodSpawnInterval = parseInt(
+          document.getElementById("foodInterval").value
+        );
+        params.currentStrength = parseFloat(
+          document.getElementById("currentStrength").value
+        );
+
+        params.maxSpeed = parseFloat(document.getElementById("maxSpeed").value);
+        params.maxForce = parseFloat(document.getElementById("maxForce").value);
+        params.separationWeight = parseFloat(
+          document.getElementById("sepWeight").value
+        );
+        params.alignmentWeight = parseFloat(
+          document.getElementById("alignWeight").value
+        );
+        params.cohesionWeight = parseFloat(
+          document.getElementById("cohWeight").value
+        );
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        drawWaterGradient();
+        drawForest();
+        drawPond();
+        drawIslands();
+        drawReefDots();
+        drawPlants();
+
+        if (stepCount % params.foodSpawnInterval === 0) {
+          spawnFoodOffCoast();
+        }
+
+        foods.forEach((food) => {
+          food.update();
+          food.draw();
+        });
+
+        fishArray.forEach((fish) => {
+          fish.applyBehaviors(fishArray);
+          fish.update(fishArray);
+          fish.draw();
+        });
+
+        predator.update(fishArray);
+        predator.draw();
+
+        turtles.forEach((turtle) => {
+          turtle.update(fishArray);
+          turtle.draw();
+        });
+
+        let aliveCount = fishArray.filter((f) => f.alive).length;
+        let aliveTurtles = turtles.filter((t) => t.alive).length;
+        cumulativeReward += aliveCount * 0.001;
+
+        document.getElementById("epochDisplay").textContent =
+          epochCount.toString();
+        document.getElementById("aliveDisplay").textContent =
+          aliveCount.toString();
+        document.getElementById("totalFish").textContent =
+          fishArray.length.toString();
+        document.getElementById("foodCount").textContent =
+          foods.length.toString();
+        document.getElementById("turtleCount").textContent =
+          aliveTurtles.toString();
+
+        if (stepCount >= params.stepsPerEpoch) {
+          epochCount++;
+          updatePolicy();
+          breedNextGeneration();
+          respawnDeadFish();
+          spawnNewTurtles();
+          stepCount = 0;
+          cumulativeReward = 0;
+        }
+
+        updateScoreboard();
+
+        requestAnimationFrame(animate);
+      }
+
+      function updatePolicy() {
+        if (cumulativeReward > 0) {
+          params.w_alignment += params.learningRate * 0.1;
+          params.w_cohesion += params.learningRate * 0.1;
+          params.w_separation -= params.learningRate * 0.1;
+        } else {
+          params.w_alignment -= params.learningRate * 0.1;
+          params.w_cohesion -= params.learningRate * 0.1;
+          params.w_separation += params.learningRate * 0.1;
+        }
+
+        params.w_alignment = Math.max(0, Math.min(5, params.w_alignment));
+        params.w_cohesion = Math.max(0, Math.min(5, params.w_cohesion));
+        params.w_separation = Math.max(0, Math.min(5, params.w_separation));
+      }
+
+      function breedNextGeneration() {
+        const aliveFish = fishArray.filter((f) => f.alive);
+        const sorted = aliveFish
+          .slice()
+          .sort((a, b) => b.foodEaten - a.foodEaten);
+
+        if (sorted.length < 2) return;
+        const parent1 = sorted[0];
+        const parent2 = sorted[1];
+
+        fishArray.forEach((fish) => {
+          if (!fish.alive) {
+            const child = Fish.reproduce(parent1, parent2);
+            fish.genes = child.genes;
+            fish.boldness = child.boldness;
+            fish.wisdom = child.wisdom;
+            fish.experience = 0;
+          }
+        });
+      }
+
+      function respawnDeadFish() {
+        fishArray.forEach((fish) => {
+          if (!fish.alive) {
+            fish.position.x =
+              params.pondCenter.x +
+              randomInRange(-params.pondRadius / 3, params.pondRadius / 3);
+            fish.position.y =
+              params.pondCenter.y +
+              randomInRange(-params.pondRadius / 3, params.pondRadius / 3);
+            fish.velocity.x = randomInRange(-1, 1);
+            fish.velocity.y = randomInRange(-1, 1);
+            fish.hunger = params.fishMaxHunger;
+            fish.energy = 1.0;
+            fish.health = fish.genes.health;
+            fish.alive = true;
+            fish.deathFade = 0;
+            fish.foodEaten = 0;
+            fish.experience = 0;
+            fish.epochsSurvived = 0;
+          } else {
+            fish.epochsSurvived++;
+            fish.wisdom += fish.experience * 0.01; // Increment wisdom based on experience
+          }
+        });
+      }
+
+      function spawnNewTurtles() {
+        // Spawn turtles based on epoch
+        if (epochCount % 5 === 0 && turtles.length < params.islandCount * 2) {
+          turtles.push(new Turtle());
+        }
+      }
+
+      function updateScoreboard() {
+        const tbody = document.getElementById("scoreboardBody");
+        tbody.innerHTML = "";
+
+        const sortedFish = fishArray
+          .slice()
+          .sort((a, b) => b.foodEaten - a.foodEaten);
+        sortedFish.forEach((fish) => {
+          const learningPercent = fish.wisdom.toFixed(2);
+          const hue = params.fishBaseColor + fish.epochsSurvived * 40;
+          const colorBox = `<div style="width:20px;height:10px;background:hsl(${hue},100%,50%)"></div>`;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${fish.fishID}</td>
+            <td>${colorBox}</td>
+            <td>${fish.epochsSurvived}</td>
+            <td>${fish.foodEaten}</td>
+            <td>${fish.hunger.toFixed(2)}</td>
+            <td>${fish.energy.toFixed(2)}</td>
+            <td>${fish.experience.toFixed(2)}</td>
+            <td>${fish.health.toFixed(2)}</td>
+            <td>${fish.boldness.toFixed(2)}</td>
+            <td>${fish.wisdom.toFixed(2)}</td>
+            <td>${learningPercent}%</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      animate();
+
+      // GUI handlers
+      document.getElementById("maxSpeed").addEventListener("input", (e) => {
+        params.maxSpeed = parseFloat(e.target.value);
+      });
+      document.getElementById("maxForce").addEventListener("input", (e) => {
+        params.maxForce = parseFloat(e.target.value);
+      });
+      document.getElementById("sepWeight").addEventListener("input", (e) => {
+        params.separationWeight = parseFloat(e.target.value);
+      });
+      document.getElementById("alignWeight").addEventListener("input", (e) => {
+        params.alignmentWeight = parseFloat(e.target.value);
+      });
+      document.getElementById("cohWeight").addEventListener("input", (e) => {
+        params.cohesionWeight = parseFloat(e.target.value);
+      });
+
+      const scoreboard = document.getElementById("scoreboard");
+      const toggleScoreBtn = document.getElementById("toggleScoreboardBtn");
+      toggleScoreBtn.addEventListener("click", () => {
+        if (scoreboard.style.display === "none") {
+          scoreboard.style.display = "block";
+          toggleScoreBtn.textContent = "Hide Data Table";
+        } else {
+          scoreboard.style.display = "none";
+          toggleScoreBtn.textContent = "Show Data Table";
+        }
+      });
+
+      const toggleHungerBtn = document.getElementById("toggleHungerBtn");
+      toggleHungerBtn.addEventListener("click", () => {
+        params.showHunger = !params.showHunger;
+        toggleHungerBtn.textContent = params.showHunger
+          ? "Hide Hunger"
+          : "Show Hunger";
+      });
+
+      // Function to add reef dots when fish die
+      function addReefDot(x, y) {
+        reefDots.push({ x, y });
+      }
+
+      function drawReefDots() {
+        reefDots.forEach((dot) => {
+          const x = dot.x - params.reefDotSize / 2;
+          const y = dot.y - params.reefDotSize / 2;
+          ctx.fillStyle = "#00aaff";
+          ctx.fillRect(x, y, params.reefDotSize, params.reefDotSize);
+        });
+      }
+
+      // Predator Interactions
+      // Handle fish being eaten by predator
+      function handlePredatorInteractions() {
+        fishArray.forEach((fish) => {
+          if (fish.alive) {
+            const dist = Math.hypot(
+              fish.position.x - predator.position.x,
+              fish.position.y - predator.position.y
+            );
+            if (dist < 20) {
+              fish.alive = false;
+              addReefDot(fish.position.x, fish.position.y);
+            }
+          }
+        });
+      }
+
+      // Plant rendering improvements
+      // Ensure plants do not overlap significantly
+      // Already handled in plant generation
+
+      // Additional enhancements can be implemented as needed
+    </script>
+  </body>
+</html>

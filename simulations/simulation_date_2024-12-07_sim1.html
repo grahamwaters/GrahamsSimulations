@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Evolution Simulation</title>
+  <style>
+    body { margin:0; overflow:hidden; }
+    canvas { background:#eee; display:block; margin:0 auto; }
+  </style>
+</head>
+<body>
+<canvas id="world"></canvas>
+<script src="https://unpkg.com/matter-js@0.17.1/build/matter.min.js"></script>
+<script>
+  const {Engine, Render, Runner, Bodies, Body, Composite, Constraint, World} = Matter;
+
+  // Setup canvas and world
+  const canvas = document.getElementById('world');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const engine = Engine.create();
+  const world = engine.world;
+  world.gravity.y = 1; // gravity
+
+  // Create ground
+  const ground = Bodies.rectangle(canvas.width / 2, canvas.height - 50, canvas.width, 100, { isStatic: true });
+  World.add(world, ground);
+
+  // Rendering
+  const render = Render.create({
+    canvas: canvas,
+    engine: engine,
+    options: {
+      width: canvas.width,
+      height: canvas.height,
+      wireframes: false
+    }
+  });
+  Render.run(render);
+
+  const runner = Runner.create();
+  Runner.run(runner, engine);
+
+  // Define a simple genome
+  // In a more complex setup, this would be an object defining multiple parts and parameters.
+  function randomGenome() {
+    return {
+      bodyLength: 50 + Math.random() * 30,
+      bodyHeight: 20 + Math.random() * 10,
+      legLength: 30 + Math.random() * 20,
+      actuationFrequency: 0.01 + Math.random() * 0.05
+    };
+  }
+
+  function createCreature(genome, startX, startY) {
+    // Simple creature: one body and two "legs"
+    const body = Bodies.rectangle(startX, startY, genome.bodyLength, genome.bodyHeight, { density:0.001 });
+    const leftLeg = Bodies.rectangle(startX - genome.bodyLength/4, startY + genome.bodyHeight/2 + genome.legLength/2, 10, genome.legLength, { density:0.001 });
+    const rightLeg = Bodies.rectangle(startX + genome.bodyLength/4, startY + genome.bodyHeight/2 + genome.legLength/2, 10, genome.legLength, { density:0.001 });
+
+    const leftJoint = Constraint.create({
+      bodyA: body, pointA: { x: -genome.bodyLength/4, y: genome.bodyHeight/2 },
+      bodyB: leftLeg, pointB: { x: 0, y: -genome.legLength/2 },
+      stiffness: 0.9, length: 0
+    });
+    const rightJoint = Constraint.create({
+      bodyA: body, pointA: { x: genome.bodyLength/4, y: genome.bodyHeight/2 },
+      bodyB: rightLeg, pointB: { x: 0, y: -genome.legLength/2 },
+      stiffness: 0.9, length: 0
+    });
+
+    World.add(world, [body, leftLeg, rightLeg, leftJoint, rightJoint]);
+
+    return {
+      body, leftLeg, rightLeg, genome,
+      update: function(time) {
+        // "Muscle" actuation example: oscillate leg angles
+        const angle = Math.sin(time * genome.actuationFrequency) * 0.5;
+        Body.setAngle(leftLeg, angle);
+        Body.setAngle(rightLeg, -angle);
+      },
+      fitness: function() {
+        // Distance traveled on x-axis as fitness
+        return body.position.x;
+      }
+    };
+  }
+
+  // Evolution parameters
+  let populationSize = 3;
+  let generation = 0;
+  let population = [];
+  let simTime = 30000; // ms per evaluation
+  let lastEvalTime = Date.now();
+
+  function createInitialPopulation() {
+    population = [];
+    for (let i = 0; i < populationSize; i++) {
+      let genome = randomGenome();
+      let creature = createCreature(genome, 200, 200);
+      population.push(creature);
+    }
+  }
+
+  createInitialPopulation();
+
+  let startTime = Date.now();
+
+  function evolve() {
+    // Evaluate fitness
+    population.forEach(creature => creature._fitness = creature.fitness());
+
+    // Sort by fitness
+    population.sort((a, b) => b._fitness - a._fitness);
+
+    // Select top half
+    let parents = population.slice(0, populationSize/2);
+
+    // Clear world except ground
+    World.clear(world, false);
+    World.add(world, ground);
+
+    // Breed new population
+    let newPop = [];
+    for (let i = 0; i < populationSize; i++) {
+      let mom = parents[Math.floor(Math.random() * parents.length)].genome;
+      let dad = parents[Math.floor(Math.random() * parents.length)].genome;
+
+      let childGenome = crossoverAndMutate(mom, dad);
+      let creature = createCreature(childGenome, 200, 200);
+      newPop.push(creature);
+    }
+    population = newPop;
+    generation++;
+  }
+
+  function crossoverAndMutate(mom, dad) {
+    function mix(a, b) { return Math.random() < 0.5 ? a : b; }
+    let child = {
+      bodyLength: mix(mom.bodyLength, dad.bodyLength),
+      bodyHeight: mix(mom.bodyHeight, dad.bodyHeight),
+      legLength: mix(mom.legLength, dad.legLength),
+      actuationFrequency: mix(mom.actuationFrequency, dad.actuationFrequency)
+    };
+    // Mutation
+    if (Math.random() < 0.1) child.bodyLength += (Math.random()-0.5)*10;
+    if (Math.random() < 0.1) child.legLength += (Math.random()-0.5)*10;
+    if (Math.random() < 0.1) child.actuationFrequency += (Math.random()-0.5)*0.01;
+    return child;
+  }
+
+  // Main loop
+  (function animate() {
+    requestAnimationFrame(animate);
+    const currentTime = Date.now();
+    const deltaTime = currentTime - startTime;
+
+    // Update creatures (muscles)
+    population.forEach(creature => {
+      creature.update(deltaTime);
+    });
+
+    // Check if evaluation period ended
+    if (currentTime - lastEvalTime > simTime) {
+      evolve();
+      lastEvalTime = currentTime;
+    }
+  })();
+</script>
+</body>
+</html>

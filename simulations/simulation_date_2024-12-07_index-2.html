@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>RL Stick Figures</title>
+    <!-- p5.js for rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.6.0/lib/p5.min.js"></script>
+
+    <!-- Matter.js for physics -->
+    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+
+    <!-- TensorFlow.js for ML -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+
+    <!-- dat.GUI for UI controls -->
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #f0f0f0;
+            font-family: sans-serif;
+        }
+        #gui-container {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+<div id="gui-container"></div>
+
+<script>
+// ============================================================
+// Global Variables and Setup
+// ============================================================
+let canvasWidth = window.innerWidth;
+let canvasHeight = window.innerHeight;
+
+let engine, world;
+let ground;
+let objects = [];
+
+// Multiple agents
+let agents = [];
+let numAgents = 3; // number of stick figure agents
+
+let gui;
+
+// RL parameters and environment parameters
+let envParams = {
+    gravity: 1.0,
+    learningRate: 0.001,
+    episodes: 1000,
+    stepsPerEpisode: 500,
+    resetSimulation: () => resetEnvironment(),
+    train: async () => { await trainPolicy(); }
+};
+
+// RL-related variables
+let currentEpisode = 0;
+let currentStep = 0;
+
+// Neural network for policy
+let policyModel;
+
+// Trajectories for policy gradient updates
+// We'll store {state, action, reward} for each step and process at episode end
+let trajectories = [];
+
+// ============================================================
+// Stick Figure Class
+// ============================================================
+
+class StickFigure {
+    constructor(x, y, world) {
+        this.world = world;
+
+        // Body parts
+        this.torso = Matter.Bodies.rectangle(x, y, 20, 60, {friction: 0.1});
+        this.leftLeg = Matter.Bodies.rectangle(x - 10, y + 40, 10, 40, {friction: 0.4});
+        this.rightLeg = Matter.Bodies.rectangle(x + 10, y + 40, 10, 40, {friction: 0.4});
+
+        Matter.World.add(world, [this.torso, this.leftLeg, this.rightLeg]);
+
+        // Joints
+        this.leftHip = Matter.Constraint.create({
+            bodyA: this.torso,
+            pointA: {x: -5, y: 30},
+            bodyB: this.leftLeg,
+            pointB: {x: 0, y: -20},
+            stiffness: 0.9,
+            length: 0
+        });
+
+        this.rightHip = Matter.Constraint.create({
+            bodyA: this.torso,
+            pointA: {x: 5, y: 30},
+            bodyB: this.rightLeg,
+            pointB: {x: 0, y: -20},
+            stiffness: 0.9,
+            length: 0
+        });
+
+        Matter.World.add(world, [this.leftHip, this.rightHip]);
+
+        this.isAlive = true; // if it falls over or goes off screen, we can mark it dead
+    }
+
+    display() {
+        fill(50, 50, 200);
+        drawBody(this.torso);
+        fill(50, 200, 50);
+        drawBody(this.leftLeg);
+        fill(200, 50, 50);
+        drawBody(this.rightLeg);
+    }
+
+    getState() {
+        // State: [torso_x, torso_y, torso_angle, left_angle, right_angle, torso_vel_x, torso_vel_y]
+        let torsoAngle = this.torso.angle;
+        let leftAngle = this.computeAngleBetweenBodies(this.torso, this.leftLeg);
+        let rightAngle = this.computeAngleBetweenBodies(this.torso, this.rightLeg);
+
+        return [
+            this.torso.position.x / canvasWidth,
+            this.torso.position.y / canvasHeight,
+            torsoAngle,
+            leftAngle,
+            rightAngle,
+            this.torso.velocity.x,
+            this.torso.velocity.y
+        ];
+    }
+
+    computeAngleBetweenBodies(bodyA, bodyB) {
+        let angleA = bodyA.angle;
+        let angleB = bodyB.angle;
+        let diff = angleB - angleA;
+        return diff;
+    }
+
+    applyAction(action) {
+        // Action: 2 values, torques for left and right hips
+        // For simplicity, action is [torqueLeft, torqueRight]
+        let torqueLeft = action[0];
+        let torqueRight = action[1];
+
+        this.applyJointTorque('leftHip', torqueLeft);
+        this.applyJointTorque('rightHip', torqueRight);
+    }
+
+    applyJointTorque(jointName, torqueValue) {
+        let leg = (jointName === 'leftHip') ? this.leftLeg : this.rightLeg;
+        let legPos = leg.position;
+        let offsetY = 20;
+        Matter.Body.applyForce(leg, {x: legPos.x, y: legPos.y + offsetY}, {x: torqueValue, y: 0});
+        Matter.Body.applyForce(leg, {x: legPos.x, y: legPos.y - offsetY}, {x: -torqueValue, y: 0});
+    }
+
+    isTerminated() {
+        // Terminate if torso falls below the ground or angle is too large
+        if (this.torso.position.y > canvasHeight - 30) return true;
+        let angle = Math.abs(this.torso.angle);
+        if (angle > Math.PI/2) return true;
+        return false;
+    }
+}
+
+// ============================================================
+// p5.js Setup and Draw
+// ============================================================
+
+function setup() {
+    createCanvas(canvasWidth, canvasHeight);
+    setupPhysics();
+    setupGUI();
+    initPolicyModel();
+    resetAgents();
+}
+
+function draw() {
+    background(220);
+
+    Matter.Engine.update(engine);
+
+    // Display ground
+    fill(100);
+    drawBody(ground);
+
+    // Display objects
+    fill(200,100,100);
+    for (let obj of objects) {
+        drawBody(obj);
+    }
+
+    // Step environment if training
+    if (currentEpisode < envParams.episodes) {
+        stepEnvironment();
+    }
+
+    // Render agents
+    for (let agent of agents) {
+        agent.display();
+    }
+}
+
+// ============================================================
+// Environment and Agents Management
+// ============================================================
+
+function setupPhysics() {
+    engine = Matter.Engine.create();
+    world = engine.world;
+    world.gravity.y = envParams.gravity;
+
+    let groundOptions = { isStatic: true };
+    ground = Matter.Bodies.rectangle(canvasWidth/2, canvasHeight - 50, canvasWidth, 100, groundOptions);
+    Matter.World.add(world, ground);
+}
+
+function resetAgents() {
+    // Clear existing agents
+    for (let a of agents) {
+        Matter.World.remove(world, a.torso);
+        Matter.World.remove(world, a.leftLeg);
+        Matter.World.remove(world, a.rightLeg);
+        Matter.World.remove(world, a.leftHip);
+        Matter.World.remove(world, a.rightHip);
+    }
+    agents = [];
+
+    // Create new agents at random positions
+    for (let i=0; i<numAgents; i++){
+        let x = width/2 + (i - numAgents/2)*100;
+        let y = height/2 - 100;
+        agents.push(new StickFigure(x, y, world));
+    }
+}
+
+function resetEnvironment() {
+    Matter.World.clear(world, false);
+    setupPhysics();
+    objects = [];
+    resetAgents();
+    currentEpisode = 0;
+    currentStep = 0;
+    trajectories = [];
+}
+
+// ============================================================
+// RL Setup and Policy
+// ============================================================
+
+function initPolicyModel() {
+    // Simple policy network: state -> hidden layer -> action mean
+    // We'll produce two outputs for actions (torques) each step.
+    // Use a small MLP.
+
+    policyModel = tf.sequential();
+    policyModel.add(tf.layers.dense({units:32, inputShape:[7], activation:'relu'}));
+    policyModel.add(tf.layers.dense({units:32, activation:'relu'}));
+    // outputs are mean torques for left and right hip
+    policyModel.add(tf.layers.dense({units:2, activation:'tanh'}));
+
+    // Not training with traditional compile/fit as we do manual gradient steps
+    // but we could compile for convenience if desired.
+}
+
+// Sample an action from the policy: we treat output as mean action and add some noise.
+function getAction(stateTensor) {
+    let meanAction = policyModel.predict(stateTensor);
+    let a = meanAction.dataSync();
+    // Add small exploration noise (if desired)
+    let action = [a[0], a[1]];
+    return action;
+}
+
+async function trainPolicy() {
+    // Simple REINFORCE-like update
+    if (trajectories.length === 0) return;
+
+    const allRewards = trajectories.map(t => t.reward);
+    const allStates = trajectories.map(t => t.state);
+    const allActions = trajectories.map(t => t.action);
+
+    // Compute returns (assuming a simple sum of rewards)
+    const returns = [];
+    let sum = 0;
+    for (let r of allRewards) {
+        sum += r;
+        returns.push(sum);
+    }
+    // Normalize returns
+    let meanReturn = returns.reduce((a,b)=>a+b,0)/returns.length;
+    let stdReturn = Math.sqrt(returns.map(r=>(r-meanReturn)**2).reduce((a,b)=>a+b,0)/returns.length);
+    let normReturns = returns.map(r=>(r-meanReturn)/(stdReturn+1e-8));
+
+    const optimizer = tf.train.adam(envParams.learningRate);
+
+    await optimizer.minimize(() => {
+        const stateTensor = tf.tensor2d(allStates);
+        const actionsTensor = tf.tensor2d(allActions);
+        const returnsTensor = tf.tensor1d(normReturns);
+
+        // Forward pass
+        const preds = policyModel.apply(stateTensor);
+        // We treat actions as deterministic from preds.
+        // To apply policy gradient, we can treat it as maximizing log-prob of actions (if we had a stochastic policy).
+        // Here we have a deterministic policy. For simplicity, pretend actions ~ N(preds, small_noise),
+        // and use MSE to push actions toward better returns.
+        // This is not a true REINFORCE method (since we did not sample stochastically).
+        // A proper RL approach would need a stochastic policy (e.g., Gaussian) and log-probs.
+        // Here, just for demonstration, we do a pseudo-gradient:
+
+        let loss = tf.mean(tf.square(tf.sub(actionsTensor, preds)).mul(-returnsTensor));
+        return loss;
+    });
+
+    // Clear trajectories
+    trajectories = [];
+}
+
+// ============================================================
+// Step Environment and Collect Experience
+// ============================================================
+
+function stepEnvironment() {
+    if (currentStep >= envParams.stepsPerEpisode) {
+        // End episode
+        endEpisode();
+        return;
+    }
+
+    for (let agent of agents) {
+        if (!agent.isAlive) continue;
+
+        // Get state
+        let state = agent.getState();
+        let stateTensor = tf.tensor2d([state]);
+        let action = getAction(stateTensor);
+        agent.applyAction(action);
+
+        // Step done after physics update in draw()
+
+        // Compute reward: Encourage moving right
+        // Also discourage falling
+        let reward = agent.torso.velocity.x; // reward forward velocity
+        if (agent.isTerminated()) {
+            agent.isAlive = false;
+            reward -= 1.0; // penalty for falling
+        }
+
+        // Store trajectory step
+        trajectories.push({
+            state: state,
+            action: action,
+            reward: reward
+        });
+    }
+
+    currentStep++;
+}
+
+function endEpisode() {
+    currentEpisode++;
+    currentStep = 0;
+    // Train after each episode
+    trainPolicy().then(() => {
+        // Reset environment for next episode
+        resetEnvironment();
+    });
+}
+
+// ============================================================
+// Rendering Helpers
+// ============================================================
+
+function drawBody(body) {
+    const vertices = body.vertices;
+    beginShape();
+    for (let v of vertices) {
+        vertex(v.x, v.y);
+    }
+    endShape(CLOSE);
+}
+
+// ============================================================
+// GUI Setup with dat.GUI
+// ============================================================
+
+function setupGUI() {
+    gui = new dat.GUI({autoPlace: false});
+    document.getElementById('gui-container').appendChild(gui.domElement);
+
+    let envFolder = gui.addFolder('Environment');
+    envFolder.add(envParams, 'gravity', 0.0, 5.0).onFinishChange(() => world.gravity.y = envParams.gravity);
+    envFolder.open();
+
+    let rlFolder = gui.addFolder('RL');
+    rlFolder.add(envParams, 'learningRate', 0.0001, 0.01, 0.0001);
+    rlFolder.add(envParams, 'episodes', 10, 5000, 10);
+    rlFolder.add(envParams, 'stepsPerEpisode', 100, 2000, 100);
+    rlFolder.add(envParams, 'resetSimulation').name('Reset');
+    rlFolder.add(envParams, 'train').name('Train Again');
+    rlFolder.open();
+}
+
+// ============================================================
+// Resize Handler
+// ============================================================
+
+function windowResized() {
+    canvasWidth = window.innerWidth;
+    canvasHeight = window.innerHeight;
+    resizeCanvas(canvasWidth, canvasHeight);
+    resetEnvironment();
+}
+</script>
+</body>
+</html>

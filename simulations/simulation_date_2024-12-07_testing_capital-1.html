@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Capital - A Simulation (Prototype)</title>
+<style>
+    body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #f7f7f7;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+    }
+
+    header {
+        background: #2c3e50;
+        color: #fff;
+        padding: 10px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    header h1 {
+        margin: 0;
+        font-size: 1.2rem;
+    }
+
+    #controls {
+        display: flex;
+        gap: 10px;
+    }
+
+    #controls button {
+        background: #34495e;
+        border: none;
+        color: #fff;
+        padding: 5px 10px;
+        cursor: pointer;
+    }
+
+    #controls button:hover {
+        background: #3b5f7c;
+    }
+
+    #main-container {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    nav {
+        width: 250px;
+        background: #ecf0f1;
+        border-right: 1px solid #ccc;
+        padding: 10px;
+        overflow-y: auto;
+    }
+
+    main {
+        flex: 1;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #map-container {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: auto;
+    }
+
+    #map {
+        display: grid;
+        grid-template-columns: repeat(20, 30px);
+        grid-template-rows: repeat(20, 30px);
+        background: #f0ead6;
+        border: 2px solid #333;
+        position: relative;
+    }
+
+    .tile {
+        width: 30px;
+        height: 30px;
+        box-sizing: border-box;
+        border: 1px solid #ccc;
+        background: #eae7dc;
+        position: relative;
+        font-size: 0.8rem;
+        text-align: center;
+        line-height: 30px;
+    }
+
+    .weak {
+        background: #f4dada; /* Vulnerable area */
+    }
+
+    .structure {
+        background: #d2e7d2; /* Built structure */
+    }
+
+    /* Agent icons */
+    .agent {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        font-size: 12px;
+        line-height: 28px;
+        text-align: center;
+        color: #fff;
+        border-radius: 50%;
+        pointer-events: none;
+        font-weight: bold;
+    }
+
+    .Mayor { background: #2c3e50; }
+    .Builder { background: #27ae60; }
+    .Raider { background: #c0392b; }
+    .Inspector { background: #f39c12; }
+    .Critic { background: #8e44ad; }
+
+    /* Learning bars */
+    .learning-bar-container {
+        margin: 10px 0;
+    }
+
+    .learning-bar-label {
+        font-size: 0.9rem;
+        margin-bottom: 2px;
+    }
+
+    .learning-bar {
+        background: #ddd;
+        height: 10px;
+        width: 100%;
+        position: relative;
+        border: 1px solid #aaa;
+    }
+
+    .learning-bar-fill {
+        background: #2ecc71;
+        height: 100%;
+        width: 0%;
+        transition: width 0.5s linear;
+    }
+
+    .info-panel {
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
+    .info-panel h2 {
+        margin-top: 0;
+    }
+</style>
+</head>
+<body>
+<header>
+    <h1>Capital - A Simulation (Prototype)</h1>
+    <div id="controls">
+        <button id="startBtn">Start Simulation</button>
+        <button id="pauseBtn">Pause</button>
+    </div>
+</header>
+<div id="main-container">
+    <nav>
+        <h2>Agent Learning</h2>
+        <div class="learning-bar-container">
+            <div class="learning-bar-label">Mayor Learning</div>
+            <div class="learning-bar"><div class="learning-bar-fill" id="mayor-learn"></div></div>
+        </div>
+        <div class="learning-bar-container">
+            <div class="learning-bar-label">Builder Learning</div>
+            <div class="learning-bar"><div class="learning-bar-fill" id="builder-learn"></div></div>
+        </div>
+        <div class="learning-bar-container">
+            <div class="learning-bar-label">Raider Learning</div>
+            <div class="learning-bar"><div class="learning-bar-fill" id="raider-learn"></div></div>
+        </div>
+        <div class="learning-bar-container">
+            <div class="learning-bar-label">Inspector Learning</div>
+            <div class="learning-bar"><div class="learning-bar-fill" id="inspector-learn"></div></div>
+        </div>
+        <div class="learning-bar-container">
+            <div class="learning-bar-label">Critic Learning</div>
+            <div class="learning-bar"><div class="learning-bar-fill" id="critic-learn"></div></div>
+        </div>
+    </nav>
+    <main>
+        <div class="info-panel">
+            <h2>Simulation Info</h2>
+            <p><strong>Mayor:</strong> Oversees city development. Assigns tasks (abstracted in this demo).</p>
+            <p><strong>Builder Agents:</strong> Construct and repair structures. They seek out "weak" tiles and turn them into "structures".</p>
+            <p><strong>Raider Agents:</strong> Attempt to sabotage and convert "structures" back into "weak" spots.</p>
+            <p><strong>Inspector Agents:</strong> Identify weak spots and mark them. (In this demo, "weak" tiles represent vulnerabilities.)</p>
+            <p><strong>Critic Agent:</strong> Analyzes the layout and influences raiders to target certain areas. (In this demo, the critic occasionally directs raiders to random weak spots.)</p>
+            <p>All learning bars above are placeholders. In a full implementation, these would represent RL training progress.</p>
+        </div>
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+    </main>
+</div>
+
+<script>
+// Simulation parameters
+const GRID_SIZE = 20;
+const TILE_SIZE = 30;
+let running = false;
+let intervalId = null;
+
+// Representing the environment as a 2D array of tiles
+// Tiles can be: "empty", "weak", "structure"
+let world = [];
+for (let r = 0; r < GRID_SIZE; r++) {
+    let row = [];
+    for (let c = 0; c < GRID_SIZE; c++) {
+        // Randomly assign some weak spots
+        if (Math.random() < 0.1) {
+            row.push("weak");
+        } else {
+            row.push("empty");
+        }
+    }
+    world.push(row);
+}
+
+// Agents
+const agents = [
+    {type:"Mayor", x:0, y:0},
+    {type:"Builder", x:5, y:5},
+    {type:"Builder", x:6, y:5},
+    {type:"Raider", x:10, y:10},
+    {type:"Inspector", x:15, y:2},
+    {type:"Critic", x:2, y:15}
+];
+
+let learningProgress = {
+    "Mayor": 0,
+    "Builder": 0,
+    "Raider": 0,
+    "Inspector": 0,
+    "Critic": 0
+};
+
+const mapEl = document.getElementById('map');
+
+// Render the grid
+function renderGrid() {
+    mapEl.innerHTML = '';
+    mapEl.style.width = (GRID_SIZE * TILE_SIZE) + 'px';
+    mapEl.style.height = (GRID_SIZE * TILE_SIZE) + 'px';
+
+    for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            const tile = document.createElement('div');
+            tile.classList.add('tile');
+            if (world[r][c] === "weak") tile.classList.add('weak');
+            if (world[r][c] === "structure") tile.classList.add('structure');
+            tile.dataset.row = r;
+            tile.dataset.col = c;
+            mapEl.appendChild(tile);
+        }
+    }
+
+    // Render agents
+    agents.forEach(a => {
+        const agentDiv = document.createElement('div');
+        agentDiv.classList.add('agent', a.type);
+        agentDiv.textContent = a.type.charAt(0);
+        agentDiv.style.left = (a.x * TILE_SIZE + 1) + 'px';
+        agentDiv.style.top = (a.y * TILE_SIZE + 1) + 'px';
+        mapEl.appendChild(agentDiv);
+    });
+}
+
+renderGrid();
+
+// Basic AI Logic
+function stepSimulation() {
+    // Simple pseudo "learning" increment
+    for (let key in learningProgress) {
+        learningProgress[key] = Math.min(100, learningProgress[key] + 0.1);
+    }
+    updateLearningBars();
+
+    // Critic occasionally "marks" a random tile as a target for raiders
+    // (In a more complex system, we'd track vulnerabilities and instruct raiders accordingly)
+    if (Math.random() < 0.01) {
+        // Nothing special for now
+    }
+
+    // Agent behavior:
+    agents.forEach(a => {
+        if (a.type === "Builder") {
+            // Move towards closest weak tile and build
+            let target = findClosestTileType(a.x, a.y, "weak");
+            if (target) {
+                moveAgentTowards(a, target.x, target.y);
+                // If on target, fix it
+                if (a.x === target.x && a.y === target.y) {
+                    world[a.y][a.x] = "structure";
+                }
+            } else {
+                randomMove(a);
+            }
+        } else if (a.type === "Raider") {
+            // Move towards a structure and sabotage it
+            let target = findClosestTileType(a.x, a.y, "structure");
+            if (target) {
+                moveAgentTowards(a, target.x, target.y);
+                if (a.x === target.x && a.y === target.y) {
+                    world[a.y][a.x] = "weak";
+                }
+            } else {
+                randomMove(a);
+            }
+        } else if (a.type === "Inspector") {
+            // Inspect random areas, we simulate by random move
+            // In a full system, Inspectors would report vulnerabilities
+            randomMove(a);
+        } else if (a.type === "Critic") {
+            // The critic just roams for now
+            randomMove(a);
+        } else if (a.type === "Mayor") {
+            // The mayor stays put or moves randomly
+            if (Math.random()<0.05) randomMove(a);
+        }
+    });
+
+    renderGrid();
+}
+
+function findClosestTileType(ax, ay, type) {
+    // Simple BFS or brute force search for demo
+    let bestDist = Infinity;
+    let best = null;
+    for (let r=0; r<GRID_SIZE; r++){
+        for (let c=0; c<GRID_SIZE; c++){
+            if (world[r][c] === type) {
+                let dist = Math.abs(r - ay) + Math.abs(c - ax);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = {x:c, y:r};
+                }
+            }
+        }
+    }
+    return best;
+}
+
+function moveAgentTowards(agent, tx, ty) {
+    // Move one step towards (tx, ty)
+    if (agent.x < tx) agent.x++;
+    else if (agent.x > tx) agent.x--;
+    else if (agent.y < ty) agent.y++;
+    else if (agent.y > ty) agent.y--;
+}
+
+function randomMove(agent) {
+    const dirs = [
+        {dx:1, dy:0},
+        {dx:-1, dy:0},
+        {dx:0, dy:1},
+        {dx:0, dy:-1},
+        {dx:0, dy:0} // sometimes stay put
+    ];
+    let d = dirs[Math.floor(Math.random() * dirs.length)];
+    let nx = agent.x + d.dx;
+    let ny = agent.y + d.dy;
+    if (nx>=0 && nx<GRID_SIZE && ny>=0 && ny<GRID_SIZE) {
+        agent.x=nx;agent.y=ny;
+    }
+}
+
+function updateLearningBars() {
+    document.getElementById('mayor-learn').style.width = learningProgress["Mayor"] + '%';
+    document.getElementById('builder-learn').style.width = learningProgress["Builder"] + '%';
+    document.getElementById('raider-learn').style.width = learningProgress["Raider"] + '%';
+    document.getElementById('inspector-learn').style.width = learningProgress["Inspector"] + '%';
+    document.getElementById('critic-learn').style.width = learningProgress["Critic"] + '%';
+}
+
+document.getElementById('startBtn').addEventListener('click', () => {
+    if (!running) {
+        running = true;
+        intervalId = setInterval(stepSimulation, 500);
+    }
+});
+
+document.getElementById('pauseBtn').addEventListener('click', () => {
+    running = false;
+    clearInterval(intervalId);
+});
+
+</script>
+</body>
+</html>

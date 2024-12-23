@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sherwood AI Crypto Trading Bot</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header>
+    <div class="logo">Sherwood AI Trading Bot</div>
+    <div class="status">Status: <span id="bot-status">Connected</span></div>
+  </header>
+
+  <main>
+    <div class="left-column">
+      <section class="chart-section">
+        <h2>Live Crypto Price</h2>
+        <canvas id="priceChart"></canvas>
+      </section>
+
+      <section class="portfolio-section">
+        <h2>Your Portfolio</h2>
+        <h3>Stocks</h3>
+        <table id="stocks-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Quantity</th>
+              <th>Price</th>
+              <th>Total Value</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <h3>Crypto</h3>
+        <table id="crypto-table">
+          <thead>
+            <tr>
+              <th>Coin</th>
+              <th>Quantity</th>
+              <th>Price</th>
+              <th>Total Value</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p>Cash: <span id="cash-value"></span></p>
+      </section>
+    </div>
+
+    <div class="right-column">
+      <section class="logs-section">
+        <h2>Bot Logs</h2>
+        <div id="logs" class="logs-feed"></div>
+      </section>
+
+      <section class="sentiment-section">
+        <h2>Sentiment Analysis</h2>
+        <div id="sentiment-feed" class="feed"></div>
+      </section>
+
+      <section class="entities-section">
+        <h2>Entities & Influencers</h2>
+        <div id="entity-feed" class="feed"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <button id="logout-btn">Logout</button>
+    <p>&copy; 2024 Sherwood AI Crypto Bot</p>
+  </footer>
+
+  <script type="module" src="scripts/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Quarry Tycoon</title>
+    <style>
+        /* Reset and Basic Styles */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #e0f7fa;
+            overflow: hidden;
+        }
+
+        h1 {
+            text-align: center;
+            margin: 20px 0;
+            color: #00695c;
+        }
+
+        /* Game Container */
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 60px);
+        }
+
+        /* Quarry and Store Sections */
+        .quarry, .store {
+            position: relative;
+            width: 80%;
+            height: 40%;
+            background-size: cover;
+            background-position: center;
+            border: 2px solid #78909c;
+            border-radius: 10px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .quarry {
+            background-image: url('assets/images/quarry.png'); /* Updated */
+        }
+
+        .store {
+            background-image: url('assets/images/store.png'); /* Updated */
+        }
+
+        /* Worker Style */
+        .worker {
+            position: absolute;
+            width: 50px; /* Adjust size as needed */
+            height: 50px;
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+            top: 50%;
+            left: 0;
+            transform: translateY(-50%);
+            opacity: 1;
+            transition: opacity 3s, transform 3s;
+            cursor: pointer;
+        }
+
+        /* Customer Style */
+        .customer {
+            position: absolute;
+            width: 50px; /* Adjust size as needed */
+            height: 50px;
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+            top: 50%;
+            right: -60px; /* Start off-screen */
+            transform: translateY(-50%);
+            opacity: 0;
+            transition: right 3s, opacity 3s;
+        }
+
+        /* Animations */
+        @keyframes moveIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes moveOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-20px); }
+        }
+
+        /* Resources and Controls */
+        .ui-container {
+            width: 80%;
+            background-color: #ffffff;
+            border: 2px solid #78909c;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .resources {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 15px;
+        }
+
+        .resource {
+            text-align: center;
+            font-size: 18px;
+            color: #37474f;
+        }
+
+        .actions, .upgrades {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+
+        .actions button, .upgrades button {
+            padding: 10px 15px;
+            margin: 5px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: #00838f;
+            color: #ffffff;
+            transition: background-color 0.3s;
+        }
+
+        .actions button:hover, .upgrades button:hover {
+            background-color: #006064;
+        }
+
+        .upgrades {
+            margin-top: 15px;
+        }
+
+        .upgrade-item {
+            background-color: #eceff1;
+            border: 1px solid #b0bec5;
+            border-radius: 5px;
+            padding: 10px;
+            width: 30%;
+            min-width: 150px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .upgrade-item h3 {
+            font-size: 16px;
+            margin-bottom: 5px;
+            color: #006064;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 16px;
+            color: #2e7d32;
+            min-height: 20px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .quarry, .store, .ui-container {
+                width: 95%;
+            }
+
+            .upgrade-item {
+                width: 45%;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .upgrade-item {
+                width: 90%;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Quarry Tycoon</h1>
+
+    <div class="game-container">
+        <!-- Quarry Section -->
+        <div class="quarry" id="quarry">
+            <!-- Workers will be appended here -->
+        </div>
+
+        <!-- Store Section -->
+        <div class="store" id="store">
+            <!-- Customers will be appended here -->
+        </div>
+
+        <!-- UI Controls -->
+        <div class="ui-container">
+            <!-- Resources Display -->
+            <div class="resources">
+                <div class="resource">Rock: <span id="rock">0</span></div>
+                <div class="resource">Sand: <span id="sand">0</span></div>
+                <div class="resource">Wood: <span id="wood">0</span></div>
+                <div class="resource">Dirt: <span id="dirt">0</span></div>
+                <div class="resource">Metal: <span id="metal">0</span></div>
+                <div class="resource">Money: $<span id="money">0</span></div>
+            </div>
+
+            <!-- Actions -->
+            <div class="actions">
+                <button id="collectBtn">Collect Materials</button>
+                <button id="sellBtn">Sell Materials</button>
+            </div>
+
+            <!-- Upgrades -->
+            <div class="upgrades">
+                <div class="upgrade-item">
+                    <h3>Hire Worker</h3>
+                    <p>Cost: $50</p>
+                    <button id="hireWorkerBtn">Hire Worker</button>
+                </div>
+                <div class="upgrade-item">
+                    <h3>Upgrade Quarry</h3>
+                    <p>Cost: $100</p>
+                    <button id="upgradeQuarryBtn">Upgrade Quarry</button>
+                </div>
+                <div class="upgrade-item">
+                    <h3>Upgrade Store</h3>
+                    <p>Cost: $150</p>
+                    <button id="upgradeStoreBtn">Upgrade Store</button>
+                </div>
+            </div>
+
+            <!-- Status Messages -->
+            <div class="status" id="status"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initial Game State
+        const gameState = {
+            resources: {
+                rock: 0,
+                sand: 0,
+                wood: 0,
+                dirt: 0,
+                metal: 0
+            },
+            money: 0,
+            workers: 0, // Start with 0 and require hiring
+            quarryLevel: 1,
+            storeLevel: 1,
+            customers: 0
+        };
+
+        // Resource Prices
+        const resourcePrices = {
+            rock: 5,
+            sand: 3,
+            wood: 4,
+            dirt: 2,
+            metal: 6
+        };
+
+        // DOM Elements
+        const rockEl = document.getElementById('rock');
+        const sandEl = document.getElementById('sand');
+        const woodEl = document.getElementById('wood');
+        const dirtEl = document.getElementById('dirt');
+        const metalEl = document.getElementById('metal');
+        const moneyEl = document.getElementById('money');
+        const statusEl = document.getElementById('status');
+
+        const collectBtn = document.getElementById('collectBtn');
+        const sellBtn = document.getElementById('sellBtn');
+
+        const hireWorkerBtn = document.getElementById('hireWorkerBtn');
+        const upgradeQuarryBtn = document.getElementById('upgradeQuarryBtn');
+        const upgradeStoreBtn = document.getElementById('upgradeStoreBtn');
+
+        const quarryEl = document.getElementById('quarry');
+        const storeEl = document.getElementById('store');
+
+        // Update UI
+        function updateUI() {
+            rockEl.textContent = gameState.resources.rock;
+            sandEl.textContent = gameState.resources.sand;
+            woodEl.textContent = gameState.resources.wood;
+            dirtEl.textContent = gameState.resources.dirt;
+            metalEl.textContent = gameState.resources.metal;
+            moneyEl.textContent = gameState.money;
+        }
+
+        // Collect Materials
+        function collectMaterials() {
+            const multiplier = gameState.quarryLevel;
+            const totalWorkers = gameState.workers;
+            if (totalWorkers === 0) {
+                statusEl.textContent = "Hire workers to start collecting materials.";
+                return;
+            }
+            gameState.resources.rock += totalWorkers * multiplier;
+            gameState.resources.sand += totalWorkers * multiplier;
+            gameState.resources.wood += totalWorkers * multiplier;
+            gameState.resources.dirt += totalWorkers * multiplier;
+            gameState.resources.metal += totalWorkers * multiplier;
+
+            statusEl.textContent = `Collected materials!`;
+            updateUI();
+        }
+
+        // Sell Materials
+        function sellMaterials() {
+            if (gameState.customers === 0) {
+                statusEl.textContent = "No customers to buy materials!";
+                return;
+            }
+
+            // Calculate total earnings
+            let totalEarned = 0;
+            for (let resource in gameState.resources) {
+                if (resource !== 'money') {
+                    const amount = gameState.resources[resource];
+                    totalEarned += amount * resourcePrices[resource];
+                    gameState.resources[resource] = 0;
+                }
+            }
+
+            gameState.money += totalEarned;
+            // Serve customers based on store level
+            const customersServed = Math.min(gameState.customers, gameState.storeLevel);
+            gameState.customers -= customersServed;
+
+            statusEl.textContent = `Sold materials for $${totalEarned}! Served ${customersServed} customer(s).`;
+            updateUI();
+        }
+
+        // Hire Worker
+        function hireWorker() {
+            const cost = 50;
+            if (gameState.money >= cost) {
+                gameState.money -= cost;
+                gameState.workers += 1;
+                statusEl.textContent = "Hired a new worker!";
+                updateUI();
+                addWorker();
+            } else {
+                statusEl.textContent = "Not enough money to hire a worker.";
+            }
+        }
+
+        // Upgrade Quarry
+        function upgradeQuarry() {
+            const cost = 100 * gameState.quarryLevel;
+            if (gameState.money >= cost) {
+                gameState.money -= cost;
+                gameState.quarryLevel += 1;
+                statusEl.textContent = "Quarry upgraded!";
+                updateUI();
+            } else {
+                statusEl.textContent = "Not enough money to upgrade quarry.";
+            }
+        }
+
+        // Upgrade Store
+        function upgradeStore() {
+            const cost = 150 * gameState.storeLevel;
+            if (gameState.money >= cost) {
+                gameState.money -= cost;
+                gameState.storeLevel += 1;
+                statusEl.textContent = "Store upgraded!";
+                updateUI();
+            } else {
+                statusEl.textContent = "Not enough money to upgrade store.";
+            }
+        }
+
+        // Add Worker Animation
+        function addWorker() {
+            const worker = document.createElement('div');
+            worker.classList.add('worker');
+            // Assign a random worker image
+            const workerNumber = Math.floor(Math.random() * 3) + 1; // Assuming 3 worker images
+            worker.style.backgroundImage = `url('assets/workers/worker${workerNumber}.png')`;
+            quarryEl.appendChild(worker);
+
+            // Function to handle random in/out animations
+            function randomAnimate() {
+                const action = Math.random() > 0.5 ? 'out' : 'in';
+                if (action === 'out') {
+                    worker.style.opacity = '0';
+                    worker.style.transform = 'translateY(-20px)';
+                } else {
+                    worker.style.opacity = '1';
+                    worker.style.transform = 'translateY(0)';
+                }
+            }
+
+            // Schedule the first animation after a random delay
+            setTimeout(randomAnimate, Math.random() * 20000 + 10000); // 10-30 seconds
+
+            // Schedule subsequent animations
+            setInterval(randomAnimate, Math.random() * 20000 + 10000); // 10-30 seconds
+        }
+
+        // Initialize Workers with Initial Animations
+        function initializeWorkers() {
+            for (let i = 0; i < gameState.workers; i++) {
+                addWorker();
+            }
+        }
+
+        // Automated Resource Collection
+        setInterval(() => {
+            collectMaterials();
+        }, 5000); // Every 5 seconds
+
+        // Automated Customer Arrival
+        function generateCustomer() {
+            const customer = document.createElement('div');
+            customer.classList.add('customer');
+            // Assign a random customer image
+            const customerNumber = Math.floor(Math.random() * 3) + 1; // Assuming 3 customer images
+            customer.style.backgroundImage = `url('assets/customers/customer${customerNumber}.png')`;
+            storeEl.appendChild(customer);
+
+            // Animate customer entering the store
+            setTimeout(() => {
+                customer.style.right = '80%'; // Move to within the store
+                customer.style.opacity = '1';
+            }, 100); // Slight delay to trigger transition
+
+            // After animation ends, remove customer and increment customers count
+            customer.addEventListener('transitionend', () => {
+                storeEl.removeChild(customer);
+                gameState.customers += 1;
+                updateUI();
+            });
+        }
+
+        // Generate Customers at Intervals
+        setInterval(() => {
+            generateCustomer();
+        }, 10000); // Every 10 seconds
+
+        // Event Listeners
+        collectBtn.addEventListener('click', collectMaterials);
+        sellBtn.addEventListener('click', sellMaterials);
+
+        hireWorkerBtn.addEventListener('click', hireWorker);
+        upgradeQuarryBtn.addEventListener('click', upgradeQuarry);
+        upgradeStoreBtn.addEventListener('click', upgradeStore);
+
+        // Initialize Game
+        function initGame() {
+            updateUI();
+            initializeWorkers();
+        }
+
+        initGame();
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sherwood AI</title>
+  <style>
+    /* General Reset */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* Body Styling */
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 20px;
+      background-color: #007acc;
+      color: white;
+    }
+
+    #datetime {
+      font-size: 0.9rem;
+    }
+
+    #email {
+      font-size: 0.9rem;
+    }
+
+    /* Main Section */
+    main {
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .holdings {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    section {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      width: 45%;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    table th, table td {
+      text-align: left;
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+    }
+
+    table th {
+      background-color: #f9f9f9;
+    }
+
+    /* Latest News */
+    #latest-news {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    #news-feed {
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #f9f9f9;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+    }
+
+    #news-feed p {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <p id="datetime"></p>
+    </div>
+    <div class="header-right">
+      <p id="email">Logged in as: <span>user@example.com</span></p>
+    </div>
+  </header>
+
+  <main>
+    <h1>Sherwood AI</h1>
+    <div class="holdings">
+      <!-- Stocks Section -->
+      <section id="stock-holdings">
+        <h2>Stock Holdings</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Stock</th>
+              <th>Quantity</th>
+              <th>Current Price</th>
+              <th>Total Value</th>
+              <th>Equity Return</th>
+            </tr>
+          </thead>
+          <tbody id="stock-table-body">
+            <!-- Dynamic rows will be added here -->
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Crypto Section -->
+      <section id="crypto-holdings">
+        <h2>Crypto Holdings</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Currency</th>
+              <th>Quantity</th>
+              <th>Current Price</th>
+              <th>Total Value</th>
+              <th>Equity Return</th>
+            </tr>
+          </thead>
+          <tbody id="crypto-table-body">
+            <!-- Dynamic rows will be added here -->
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <!-- News Section -->
+    <section id="latest-news">
+      <h2>Latest News</h2>
+      <div id="news-feed">
+        <p>Loading latest news...</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Update Date and Time
+    function updateDateTime() {
+      const datetimeElement = document.getElementById('datetime');
+      const now = new Date();
+      datetimeElement.textContent = now.toLocaleString();
+    }
+    setInterval(updateDateTime, 1000);
+
+    // Example Stock and Crypto Data
+    const stockData = [
+      { name: "AAPL", quantity: 10, price: 150, equityReturn: "10%" },
+      { name: "GOOGL", quantity: 5, price: 2800, equityReturn: "5%" },
+    ];
+
+    const cryptoData = [
+      { name: "Bitcoin", quantity: 0.5, price: 50000, equityReturn: "20%" },
+      { name: "Ethereum", quantity: 2, price: 4000, equityReturn: "15%" },
+    ];
+
+    // Populate Tables
+    function populateTable(data, tableBodyId) {
+      const tableBody = document.getElementById(tableBodyId);
+      tableBody.innerHTML = "";
+      data.forEach((item) => {
+        const totalValue = (item.quantity * item.price).toFixed(2);
+        const row = `
+          <tr>
+            <td>${item.name}</td>
+            <td>${item.quantity}</td>
+            <td>$${item.price.toLocaleString()}</td>
+            <td>$${totalValue}</td>
+            <td>${item.equityReturn}</td>
+          </tr>
+        `;
+        tableBody.innerHTML += row;
+      });
+    }
+
+    // Load Stock and Crypto Data
+    document.addEventListener("DOMContentLoaded", () => {
+      populateTable(stockData, "stock-table-body");
+      populateTable(cryptoData, "crypto-table-body");
+    });
+
+    // Fetch Latest News
+    function fetchLatestNews() {
+      const newsFeed = document.getElementById("news-feed");
+      const newsArticles = [
+        "Stock Market Hits Record Highs",
+        "Bitcoin Surpasses $50K",
+        "Economic Recovery Accelerates",
+        "Tech Companies Lead Gains",
+      ];
+
+      newsFeed.innerHTML = newsArticles
+        .map((article) => `<p>${article}</p>`)
+        .join("");
+    }
+    fetchLatestNews();
+  </script>
+</body>
+</html>

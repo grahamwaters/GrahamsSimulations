@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Koi Evolution Simulation - Enhanced</title>
+  <style>
+    /* Basic Styles */
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #0a150f;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100vh;
+    }
+
+    /* Control Panel Styles */
+    #controlPanel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      z-index: 999;
+      max-width: 200px;
+    }
+
+    #controlPanel label {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    /* Scoreboard Styles */
+    #scoreboard {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      background: rgba(255,255,255,0.9);
+      overflow-y: auto;
+      font-size: 12px;
+      z-index: 998;
+      border-top: 1px solid #ccc;
+      display: none;
+    }
+
+    #scoreboard table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    #scoreboard th, #scoreboard td {
+      text-align: left;
+      padding: 5px;
+      border-bottom: 1px solid #ccc;
+    }
+
+    /* Info Panel Styles */
+    #infoPanel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      z-index: 1000;
+      max-width: 200px;
+    }
+
+    #infoPanel h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+
+    /* Buttons Styles */
+    .controlButton {
+      position: absolute;
+      bottom: 210px;
+      left: 10px;
+      z-index: 1001;
+      background: rgba(255,255,255,0.8);
+      border: 1px solid #ccc;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 12px;
+      border-radius: 3px;
+      margin-top: 5px;
+    }
+
+    #toggleHungerBtn {
+      bottom: 240px;
+    }
+
+    #addFishBtn, #addPredatorBtn, #addFoodBtn, #removeFishBtn, #removePredatorBtn, #removeFoodBtn {
+      bottom: 270px;
+    }
+
+    /* Modal Styles for Save/Load */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 2000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.4);
+    }
+
+    .modal-content {
+      background-color: #fefefe;
+      margin: 15% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 300px;
+      border-radius: 5px;
+    }
+
+    .close {
+      color: #aaa;
+      float: right;
+      font-size: 24px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .close:hover,
+    .close:focus {
+      color: black;
+      text-decoration: none;
+    }
+
+    #dayNightToggle {
+      margin-top: 10px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="simulationCanvas"></canvas>
+
+  <!-- Info Panel -->
+  <div id="infoPanel">
+    <h2>Info</h2>
+    <div>Epoch: <span id="epochDisplay">0</span></div>
+    <div>Alive Fish: <span id="aliveDisplay">0</span>/<span id="totalFish">0</span></div>
+    <div>Food Count: <span id="foodCount">0</span></div>
+    <div>Predators: <span id="predatorCount">0</span></div>
+    <div>Day/Night: <span id="dayNightStatus">Day</span></div>
+  </div>
+
+  <!-- Control Panel -->
+  <div id="controlPanel">
+    <label>Max Speed: <input type="range" id="maxSpeed" min="0.1" max="3" step="0.1" value="1"/></label>
+    <label>Max Force: <input type="range" id="maxForce" min="0.01" max="0.5" step="0.01" value="0.05"/></label>
+    <label>Separation Weight: <input type="range" id="sepWeight" min="0" max="5" step="0.1" value="0.5"/></label>
+    <label>Alignment Weight: <input type="range" id="alignWeight" min="0" max="5" step="0.1" value="1.0"/></label>
+    <label>Cohesion Weight: <input type="range" id="cohWeight" min="0" max="5" step="0.1" value="0.5"/></label>
+    <button id="pauseBtn">Pause</button>
+    <button id="resetBtn">Reset</button>
+    <button id="saveStateBtn">Save State</button>
+    <button id="loadStateBtn">Load State</button>
+    <button id="dayNightToggle">Toggle Day/Night</button>
+  </div>
+
+  <!-- Action Buttons -->
+  <button class="controlButton" id="toggleHungerBtn">Hide Hunger</button>
+  <button class="controlButton" id="toggleScoreboardBtn">Show Data Table</button>
+  <button class="controlButton" id="addFishBtn">Add Fish</button>
+  <button class="controlButton" id="removeFishBtn">Remove Fish</button>
+  <button class="controlButton" id="addPredatorBtn">Add Predator</button>
+  <button class="controlButton" id="removePredatorBtn">Remove Predator</button>
+  <button class="controlButton" id="addFoodBtn">Add Food</button>
+  <button class="controlButton" id="removeFoodBtn">Remove Food</button>
+
+  <!-- Scoreboard -->
+  <div id="scoreboard">
+    <table>
+      <thead>
+        <tr>
+          <th>Fish ID</th>
+          <th>Color</th>
+          <th>Epochs Survived</th>
+          <th>Food Eaten</th>
+          <th>Hunger</th>
+          <th>Health</th>
+          <th>Learning %</th>
+        </tr>
+      </thead>
+      <tbody id="scoreboardBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Save State Modal -->
+  <div id="saveModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeSaveModal">&times;</span>
+      <h3>Save Simulation State</h3>
+      <textarea id="saveData" style="width:100%; height:150px;"></textarea>
+      <button id="copySaveData">Copy to Clipboard</button>
+    </div>
+  </div>
+
+  <!-- Load State Modal -->
+  <div id="loadModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeLoadModal">&times;</span>
+      <h3>Load Simulation State</h3>
+      <textarea id="loadData" style="width:100%; height:150px;"></textarea>
+      <button id="loadState">Load State</button>
+    </div>
+  </div>
+
+  <script>
+    // Initialization
+    const canvas = document.getElementById("simulationCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Resize canvas dynamically
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      generateLake();
+      offscreenCtx.clearRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+      offscreenCtx.drawImage(islandOffscreen, 0, 0);
+    });
+
+    // Utility Functions
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function pointInPolygon(point, polygon) {
+      let { x, y } = point;
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i].x, yi = polygon[i].y;
+        const xj = polygon[j].x, yj = polygon[j].y;
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi)*(y - yi)/(yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // Offscreen Canvas for Static Elements
+    const offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = canvas.width;
+    offscreenCanvas.height = canvas.height;
+    const offscreenCtx = offscreenCanvas.getContext('2d');
+
+    // Simulation Parameters
+    const params = {
+      pondRadius: Math.min(canvas.width, canvas.height) / 3 + 150,
+      pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
+      fishCount: 50,
+      maxSpeed: 1,
+      maxForce: 0.05,
+      perceptionRadius: 50,
+      separationDistance: 20,
+      edgeBuffer: 50,
+      islandRepelRadius: 50,
+      islandRepelForce: 0.2,
+      edgeRepelForce: 0.1,
+      separationWeight: 0.5,
+      alignmentWeight: 1.0,
+      cohesionWeight: 0.5,
+      currentStrength: 0.001,
+      currentRandomness: 0.25,
+      islandCount: 5,
+      fishBaseColor: 30,
+      fishMaxHunger: 1.0,
+      hungerDecreaseRate: 0.001,
+      edgeDangerMultiplier: 2.0,
+      foodSpawnInterval: 100,
+      foodRestoreAmount: 0.5,
+      stepsPerEpoch: 2000,
+      learningRate: 0.01,
+      w_alignment: 1.0,
+      w_cohesion: 0.5,
+      w_separation: 0.5,
+      predatorSpeed: 1.0,
+      predatorMaxForce: 0.02,
+      showHunger: true,
+      reefDotSize: 4,
+      // Damage parameters
+      damageIsland: 0.002,
+      damagePredator: 0.001,
+      damageOvercrowd: 0.008,
+      // Day/Night Cycle
+      isDay: true,
+      dayDuration: 6000, // in frames
+      nightDuration: 3000, // in frames
+      frameCount: 0,
+      lightingIntensity: 1.0,
+    };
+
+    // Entity Arrays
+    const fishArray = [];
+    const islands = [];
+    const foods = [];
+    const predators = [];
+    const reefDots = [];
+    const particles = [];
+
+    // Object Pool for Food
+    const foodPool = [];
+    const MAX_FOOD = 200;
+
+    // Pre-rendered Islands
+    let islandOffscreen = document.createElement('canvas');
+    islandOffscreen.width = canvas.width;
+    islandOffscreen.height = canvas.height;
+    const islandCtx = islandOffscreen.getContext('2d');
+
+    // Generate Lake Outline
+    function generateLake() {
+      lakeOutline.length = 0;
+      for (let angle = 0; angle < 360; angle += 5) {
+        const rad = (Math.PI / 180) * angle;
+        const radius = params.pondRadius + randomInRange(-30, 30);
+        const x = params.pondCenter.x + radius * Math.cos(rad);
+        const y = params.pondCenter.y + radius * Math.sin(rad);
+        lakeOutline.push({ x, y });
+      }
+    }
+    const lakeOutline = [];
+    generateLake();
+
+    // Draw Pond on Offscreen Canvas
+    function drawPond() {
+      offscreenCtx.fillStyle = params.isDay ? "#1E90FF" : "#0a150f";
+      offscreenCtx.beginPath();
+      offscreenCtx.moveTo(lakeOutline[0].x, lakeOutline[0].y);
+      lakeOutline.forEach(point => offscreenCtx.lineTo(point.x, point.y));
+      offscreenCtx.closePath();
+      offscreenCtx.fill();
+    }
+
+    // Island Generation with Offscreen Rendering
+    function generateIslands(count) {
+      let attempts = 0;
+      for (let i = 0; i < count; i++) {
+        let islandPoints;
+        let islandCenter;
+        let size;
+        let valid = false;
+        while (!valid && attempts < 1000) {
+          attempts++;
+          islandCenter = {
+            x: randomInRange(
+              params.pondCenter.x - params.pondRadius / 2,
+              params.pondCenter.x + params.pondRadius / 2
+            ),
+            y: randomInRange(
+              params.pondCenter.y - params.pondRadius / 2,
+              params.pondCenter.y + params.pondRadius / 2
+            ),
+          };
+          size = randomInRange(40, 70);
+          if (islandsOverlap(islandCenter.x, islandCenter.y, size)) continue;
+
+          islandPoints = [];
+          for (let angle = 0; angle < 360; angle += 20) {
+            const rad = (Math.PI / 180) * angle;
+            const radius = size + randomInRange(-15, 15);
+            const x = islandCenter.x + Math.cos(rad) * radius;
+            const y = islandCenter.y + Math.sin(rad) * radius;
+            islandPoints.push({ x, y });
+          }
+          valid = true;
+        }
+        if (valid) islands.push(islandPoints);
+        else break;
+      }
+
+      // Draw Islands on Offscreen Canvas
+      islands.forEach(points => {
+        islandCtx.beginPath();
+        islandCtx.moveTo(points[0].x, points[0].y);
+        points.forEach(point => islandCtx.lineTo(point.x, point.y));
+        islandCtx.closePath();
+        islandCtx.fillStyle = "#006400";
+        islandCtx.fill();
+        islandCtx.strokeStyle = "#FFFFFF";
+        islandCtx.lineWidth = 2;
+        islandCtx.stroke();
+      });
+    }
+
+    function islandsOverlap(x, y, size) {
+      for (let points of islands) {
+        let cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+        let cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+        let dx = cx - x;
+        let dy = cy - y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < size * 2) return true;
+      }
+      return false;
+    }
+
+    // Initialize Lake and Islands
+    drawPond();
+    generateIslands(params.islandCount);
+    offscreenCtx.drawImage(islandOffscreen, 0, 0);
+
+    // Particle Class for Effects
+    class Particle {
+      constructor(x, y, color, size, lifespan) {
+        this.position = { x, y };
+        this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+        this.color = color;
+        this.size = size;
+        this.lifespan = lifespan;
+        this.age = 0;
+      }
+
+      update() {
+        this.position.x += this.velocity.x;
+        this.position.y += this.velocity.y;
+        this.age++;
+      }
+
+      draw() {
+        ctx.save();
+        ctx.globalAlpha = 1 - this.age / this.lifespan;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.position.x, this.position.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      isDead() {
+        return this.age >= this.lifespan;
+      }
+    }
+
+    // Object Pool for Food
+    class Food {
+      constructor() {
+        this.position = { x: 0, y: 0 };
+        this.size = 5;
+        this.vel = { x: 0, y: 0 };
+        this.active = false;
+      }
+
+      activate(x, y) {
+        this.position.x = x;
+        this.position.y = y;
+        this.vel.x = randomInRange(-0.1, 0.1);
+        this.vel.y = randomInRange(-0.1, 0.1);
+        this.active = true;
+      }
+
+      deactivate() {
+        this.active = false;
+      }
+
+      update() {
+        if (!this.active) return;
+        this.position.x += this.vel.x;
+        this.position.y += this.vel.y;
+
+        // Add randomness
+        this.vel.x += randomInRange(-0.01, 0.01);
+        this.vel.y += randomInRange(-0.01, 0.01);
+
+        // Boundary Conditions
+        for (let island of islands) {
+          if (pointInPolygon(this.position, island)) {
+            let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+            let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+            let dx = this.position.x - cx;
+            let dy = this.position.y - cy;
+            let dist = Math.hypot(dx, dy);
+            if (dist === 0) { dx = 1; dist = 1; }
+            dx /= dist; dy /= dist;
+            this.position.x += dx * 2;
+            this.position.y += dy * 2;
+            this.vel.x += dx * 0.1;
+            this.vel.y += dy * 0.1;
+          }
+        }
+
+        // Limit Speed
+        const speed = Math.hypot(this.vel.x, this.vel.y);
+        if (speed > 0.2) {
+          this.vel.x = (this.vel.x / speed) * 0.2;
+          this.vel.y = (this.vel.y / speed) * 0.2;
+        }
+      }
+
+      draw() {
+        if (!this.active) return;
+        ctx.fillStyle = "yellow";
+        ctx.beginPath();
+        ctx.arc(this.position.x, this.position.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Initialize Food Pool
+    for (let i = 0; i < MAX_FOOD; i++) {
+      foodPool.push(new Food());
+    }
+
+    // Fish Class
+    class Fish {
+      constructor() {
+        this.fishID = Fish.incrementID();
+        this.position = {
+          x: params.pondCenter.x + randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+          y: params.pondCenter.y + randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+        };
+        this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+        this.acceleration = { x: 0, y: 0 };
+        this.hunger = params.fishMaxHunger;
+        this.health = 1.0;
+        this.alive = true;
+        this.deathFade = 0;
+        this.epochsSurvived = 0;
+        this.foodEaten = 0;
+        this.baseHue = params.fishBaseColor;
+        this.bodyLength = 10;
+        this.bodyWidth = 4;
+        this.genes = {
+          speed: randomInRange(0.5, 1.5),
+          force: randomInRange(0.02, 0.05),
+          health: randomInRange(0.8, 1.2)
+        };
+      }
+
+      static incrementID() {
+        if (!this.latestID) this.latestID = 1;
+        else this.latestID++;
+        return this.latestID;
+      }
+
+      static reproduce(parent1, parent2) {
+        const child = new Fish();
+        child.genes.speed = (parent1.genes.speed + parent2.genes.speed) / 2;
+        child.genes.force = (parent1.genes.force + parent2.genes.force) / 2;
+        child.genes.health = (parent1.genes.health + parent2.genes.health) / 2;
+        // Mutation
+        child.genes.speed *= 1 + randomInRange(-0.1, 0.1);
+        child.genes.force *= 1 + randomInRange(-0.1, 0.1);
+        child.genes.health *= 1 + randomInRange(-0.1, 0.1);
+        return child;
+      }
+
+      update(fishArray, predatorArray) {
+        if (this.alive) {
+          this.velocity.x += this.acceleration.x;
+          this.velocity.y += this.acceleration.y;
+
+          // Limit speed based on genes
+          const speed = Math.hypot(this.velocity.x, this.velocity.y);
+          if (speed > this.genes.speed) {
+            this.velocity.x = (this.velocity.x / speed) * this.genes.speed;
+            this.velocity.y = (this.velocity.y / speed) * this.genes.speed;
+          }
+
+          this.position.x += this.velocity.x;
+          this.position.y += this.velocity.y;
+
+          this.acceleration.x = 0;
+          this.acceleration.y = 0;
+
+          this.decreaseHunger();
+          this.eatFood();
+          this.applyDamage(fishArray, predatorArray);
+
+          if (this.hunger <= 0 || this.health <= 0) {
+            this.alive = false;
+            addReefDot(this.position.x, this.position.y);
+            spawnParticle(this.position.x, this.position.y, 'rgba(255,0,0,0.5)', 3, 30);
+          } else {
+            this.avoidEdges();
+            this.avoidIslands();
+          }
+        } else {
+          this.deathFade++;
+        }
+      }
+
+      applyDamage(fishArray, predatorArray) {
+        let damageThisFrame = 0;
+        // Island damage
+        for (let island of islands) {
+          if (pointInPolygon(this.position, island)) {
+            damageThisFrame += params.damageIsland;
+          }
+        }
+
+        // Predator damage
+        predatorArray.forEach(predator => {
+          const distPred = Math.hypot(this.position.x - predator.position.x, this.position.y - predator.position.y);
+          if (distPred < 30) {
+            damageThisFrame += params.damagePredator;
+            predator.attackFish(this);
+            spawnParticle(this.position.x, this.position.y, 'rgba(255,0,0,0.7)', 4, 20);
+          }
+        });
+
+        // Overcrowding damage
+        let closeCount = 0;
+        fishArray.forEach(other => {
+          if (other !== this && other.alive) {
+            const d = Math.hypot(this.position.x - other.position.x, this.position.y - other.position.y);
+            if (d < params.separationDistance * 0.5) {
+              closeCount++;
+            }
+          }
+        });
+        if (closeCount > 3) {
+          damageThisFrame += params.damageOvercrowd;
+        }
+
+        if (damageThisFrame > 0) {
+          this.health -= damageThisFrame;
+          cumulativeReward -= damageThisFrame * 0.5;
+        }
+      }
+
+      decreaseHunger() {
+        let decrease = params.hungerDecreaseRate;
+        const distToCenter = Math.hypot(this.position.x - params.pondCenter.x, this.position.y - params.pondCenter.y);
+        if (distToCenter > params.pondRadius - params.edgeBuffer) {
+          decrease *= params.edgeDangerMultiplier;
+        }
+        this.hunger -= decrease;
+        if (this.hunger < 0) this.hunger = 0;
+      }
+
+      eatFood() {
+        for (let i = foods.length - 1; i >= 0; i--) {
+          const f = foods[i];
+          const d = Math.hypot(this.position.x - f.position.x, this.position.y - f.position.y);
+          if (d < 10) {
+            this.hunger = Math.min(params.fishMaxHunger, this.hunger + params.foodRestoreAmount);
+            this.foodEaten++;
+            cumulativeReward += 1;
+            f.deactivate();
+            spawnParticle(f.position.x, f.position.y, 'rgba(255,255,0,0.8)', 2, 20);
+          }
+        }
+      }
+
+      applyBehaviors(fishArray, predatorArray) {
+        if (!this.alive) return;
+        const w_align = params.w_alignment;
+        const w_coh = params.w_cohesion;
+        const w_sep = params.w_separation;
+
+        const alignment = this.alignment(fishArray);
+        const cohesion = this.cohesion(fishArray);
+        const separation = this.separation(fishArray);
+        const foodSteer = this.seekFood();
+        const predAvoid = this.avoidPredators(predatorArray);
+
+        this.acceleration.x +=
+          alignment.x * w_align +
+          cohesion.x * w_coh +
+          separation.x * w_sep +
+          foodSteer.x * 1.0 +
+          predAvoid.x * 2.0;
+        this.acceleration.y +=
+          alignment.y * w_align +
+          cohesion.y * w_coh +
+          separation.y * w_sep +
+          foodSteer.y * 1.0 +
+          predAvoid.y * 2.0;
+      }
+
+      avoidPredators(predatorArray) {
+        let steer = { x: 0, y: 0 };
+        let count = 0;
+        predatorArray.forEach(predator => {
+          const d = Math.hypot(this.position.x - predator.position.x, this.position.y - predator.position.y);
+          if (d < params.perceptionRadius * 2) {
+            let diff = { x: this.position.x - predator.position.x, y: this.position.y - predator.position.y };
+            const mag = Math.hypot(diff.x, diff.y);
+            if (mag > 0) {
+              diff.x /= mag;
+              diff.y /= mag;
+              steer.x += diff.x;
+              steer.y += diff.y;
+              count++;
+            }
+          }
+        });
+        if (count > 0) {
+          steer.x /= count;
+          steer.y /= count;
+          const mag = Math.hypot(steer.x, steer.y);
+          if (mag > 0) {
+            steer.x = (steer.x / mag) * this.genes.speed - this.velocity.x;
+            steer.y = (steer.y / mag) * this.genes.speed - this.velocity.y;
+          }
+        }
+        return steer;
+      }
+
+      seekFood() {
+        let nearestDist = Infinity;
+        let target = null;
+        for (let f of foods) {
+          if (!f.active) continue;
+          const d = Math.hypot(this.position.x - f.position.x, this.position.y - f.position.y);
+          if (d < nearestDist) {
+            nearestDist = d;
+            target = f;
+          }
+        }
+        if (target) {
+          const desired = { x: target.position.x - this.position.x, y: target.position.y - this.position.y };
+          const mag = Math.hypot(desired.x, desired.y);
+          if (mag > 0) {
+            desired.x = (desired.x / mag) * this.genes.speed;
+            desired.y = (desired.y / mag) * this.genes.speed;
+          }
+          const steer = { x: desired.x - this.velocity.x, y: desired.y - this.velocity.y };
+          const smag = Math.hypot(steer.x, steer.y);
+          if (smag > this.genes.force) {
+            steer.x = (steer.x / smag) * this.genes.force;
+            steer.y = (steer.y / smag) * this.genes.force;
+          }
+          return steer;
+        }
+        return { x: 0, y: 0 };
+      }
+
+      separation(fishArray) {
+        let steer = { x: 0, y: 0 };
+        let count = 0;
+        fishArray.forEach(other => {
+          if (other === this || !other.alive) return;
+          const d = Math.hypot(this.position.x - other.position.x, this.position.y - other.position.y);
+          if (d > 0 && d < params.separationDistance) {
+            const diff = { x: this.position.x - other.position.x, y: this.position.y - other.position.y };
+            const dist = Math.hypot(diff.x, diff.y);
+            diff.x /= dist;
+            diff.y /= dist;
+            steer.x += diff.x;
+            steer.y += diff.y;
+            count++;
+          }
+        });
+
+        if (count > 0) {
+          steer.x /= count;
+          steer.y /= count;
+
+          const mag = Math.hypot(steer.x, steer.y);
+          if (mag > 0) {
+            steer.x = (steer.x / mag) * this.genes.speed - this.velocity.x;
+            steer.y = (steer.y / mag) * this.genes.speed - this.velocity.y;
+          }
+        }
+        return steer;
+      }
+
+      alignment(fishArray) {
+        let sum = { x: 0, y: 0 };
+        let count = 0;
+
+        fishArray.forEach(other => {
+          if (other === this || !other.alive) return;
+          const d = Math.hypot(this.position.x - other.position.x, this.position.y - other.position.y);
+          if (d > 0 && d < params.perceptionRadius) {
+            sum.x += other.velocity.x;
+            sum.y += other.velocity.y;
+            count++;
+          }
+        });
+
+        if (count > 0) {
+          sum.x /= count;
+          sum.y /= count;
+
+          const mag = Math.hypot(sum.x, sum.y);
+          if (mag > 0) {
+            sum.x = (sum.x / mag) * this.genes.speed;
+            sum.y = (sum.y / mag) * this.genes.speed;
+          }
+
+          const steer = { x: sum.x - this.velocity.x, y: sum.y - this.velocity.y };
+          const steerMag = Math.hypot(steer.x, steer.y);
+          if (steerMag > this.genes.force) {
+            steer.x = (steer.x / steerMag) * this.genes.force;
+            steer.y = (steer.y / steerMag) * this.genes.force;
+          }
+          return steer;
+        }
+
+        return { x: 0, y: 0 };
+      }
+
+      cohesion(fishArray) {
+        let sum = { x: 0, y: 0 };
+        let count = 0;
+
+        fishArray.forEach(other => {
+          if (other === this || !other.alive) return;
+          const d = Math.hypot(this.position.x - other.position.x, this.position.y - other.position.y);
+          if (d > 0 && d < params.perceptionRadius) {
+            sum.x += other.position.x;
+            sum.y += other.position.y;
+            count++;
+          }
+        });
+
+        if (count > 0) {
+          sum.x /= count;
+          sum.y /= count;
+
+          const desired = { x: sum.x - this.position.x, y: sum.y - this.position.y };
+          const mag = Math.hypot(desired.x, desired.y);
+          if (mag > 0) {
+            desired.x = (desired.x / mag) * this.genes.speed;
+            desired.y = (desired.y / mag) * this.genes.speed;
+          }
+
+          const steer = { x: desired.x - this.velocity.x, y: desired.y - this.velocity.y };
+          const steerMag = Math.hypot(steer.x, steer.y);
+          if (steerMag > this.genes.force) {
+            steer.x = (steer.x / steerMag) * this.genes.force;
+            steer.y = (steer.y / steerMag) * this.genes.force;
+          }
+          return steer;
+        }
+
+        return { x: 0, y: 0 };
+      }
+
+      avoidEdges() {
+        const distToCenter = Math.hypot(
+          this.position.x - params.pondCenter.x,
+          this.position.y - params.pondCenter.y
+        );
+        if (distToCenter > params.pondRadius - params.edgeBuffer) {
+          const angle = Math.atan2(
+            this.position.y - params.pondCenter.y,
+            this.position.x - params.pondCenter.x
+          );
+          const force =
+            (distToCenter - (params.pondRadius - params.edgeBuffer)) *
+            params.edgeRepelForce;
+          this.acceleration.x -= Math.cos(angle) * force;
+          this.acceleration.y -= Math.sin(angle) * force;
+        }
+      }
+
+      // Enhanced island avoidance
+      avoidIslands() {
+        islands.forEach(island => {
+          let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+          let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+          const dx = this.position.x - cx;
+          const dy = this.position.y - cy;
+          const dist = Math.hypot(dx, dy);
+
+          const inside = pointInPolygon(this.position, island);
+
+          if (inside) {
+            let dirX = dx / dist;
+            let dirY = dy / dist;
+            const force = 0.5;
+            this.acceleration.x += dirX * force;
+            this.acceleration.y += dirY * force;
+          } else {
+            const safeDistance = 50;
+            if (dist < safeDistance) {
+              let dirX = dx / dist;
+              let dirY = dy / dist;
+              const proximity = (safeDistance - dist) / safeDistance;
+              const force = proximity * 0.1;
+              this.acceleration.x += dirX * force;
+              this.acceleration.y += dirY * force;
+            }
+          }
+        });
+      }
+
+      draw() {
+        if (!this.alive) {
+          const fadeFactor = Math.min(this.deathFade / 200, 1);
+          ctx.save();
+          ctx.translate(this.position.x, this.position.y);
+          ctx.globalAlpha = 1 - fadeFactor;
+          ctx.fillStyle = "hsl(210,100%,20%)";
+          ctx.beginPath();
+          ctx.ellipse(0, 0, this.bodyLength, this.bodyWidth, 0, 0, 2 * Math.PI);
+          ctx.fill();
+
+          // Tail
+          ctx.save();
+          ctx.translate(-this.bodyLength, 0);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-10, 2);
+          ctx.lineTo(-10, -2);
+          ctx.closePath();
+          ctx.fillStyle = "hsl(210,100%,15%)";
+          ctx.fill();
+          ctx.restore();
+
+          // Fins
+          ctx.save();
+          ctx.translate(-3, 0);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-7, -2);
+          ctx.lineTo(-7, -6);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(100,100,255,0.8)';
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-7, 2);
+          ctx.lineTo(-7, 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          ctx.restore();
+          return;
+        }
+
+        const tailAngle = Math.sin(params.frameCount * 0.2 + this.fishID) * 0.5;
+        const finAngle = Math.sin(params.frameCount * 0.4 + this.fishID) * 0.3;
+        let hue = this.baseHue + this.epochsSurvived * 40;
+
+        ctx.save();
+        ctx.translate(this.position.x, this.position.y);
+        ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
+        ctx.fillStyle = `hsl(${hue},100%,50%)`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, this.bodyLength, this.bodyWidth, 0, 0, 2 * Math.PI);
+        ctx.fill();
+
+        // Tail
+        ctx.save();
+        ctx.translate(-this.bodyLength, 0);
+        ctx.rotate(tailAngle);
+        ctx.fillStyle = `hsl(${hue},100%,40%)`;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-10, 2);
+        ctx.lineTo(-10, -2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Fins
+        ctx.save();
+        ctx.translate(-3, 0);
+        // Top Fin
+        ctx.save();
+        ctx.rotate(-Math.PI / 2 + finAngle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-7, -2);
+        ctx.lineTo(-7, -6);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fill();
+        ctx.restore();
+
+        // Bottom Fin
+        ctx.save();
+        ctx.rotate(Math.PI / 2 - finAngle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-7, 2);
+        ctx.lineTo(-7, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.restore();
+
+        ctx.restore();
+
+        if (params.showHunger) {
+          ctx.fillStyle = "white";
+          ctx.font = "10px sans-serif";
+          ctx.fillText(this.hunger.toFixed(2), this.position.x + 5, this.position.y - 5);
+        }
+      }
+    }
+
+    // Predator Class
+    class Predator {
+      constructor(type = 'shark') {
+        this.type = type;
+        this.position = {
+          x: params.pondCenter.x,
+          y: params.pondCenter.y
+        };
+        this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+        this.acceleration = { x: 0, y: 0 };
+        this.size = type === 'shark' ? 15 : 10;
+        this.color = type === 'shark' ? 'red' : 'purple';
+      }
+
+      update(fishArray) {
+        let target = this.huntTarget(fishArray);
+        if (target) {
+          const desired = { x: target.position.x - this.position.x, y: target.position.y - this.position.y };
+          const mag = Math.hypot(desired.x, desired.y);
+          if (mag > 0) {
+            desired.x = (desired.x / mag) * params.predatorMaxForce * 10;
+            desired.y = (desired.y / mag) * params.predatorMaxForce * 10;
+          }
+          this.acceleration.x += desired.x;
+          this.acceleration.y += desired.y;
+        }
+
+        this.velocity.x += this.acceleration.x;
+        this.velocity.y += this.acceleration.y;
+
+        const speed = Math.hypot(this.velocity.x, this.velocity.y);
+        if (speed > params.predatorSpeed) {
+          this.velocity.x = (this.velocity.x / speed) * params.predatorSpeed;
+          this.velocity.y = (this.velocity.y / speed) * params.predatorSpeed;
+        }
+
+        this.position.x += this.velocity.x;
+        this.position.y += this.velocity.y;
+
+        this.acceleration.x = 0;
+        this.acceleration.y = 0;
+
+        // Boundary Conditions
+        const distToCenter = Math.hypot(
+          this.position.x - params.pondCenter.x,
+          this.position.y - params.pondCenter.y
+        );
+        if (distToCenter > params.pondRadius) {
+          const angle = Math.atan2(
+            this.position.y - params.pondCenter.y,
+            this.position.x - params.pondCenter.x
+          );
+          this.velocity.x = -Math.cos(angle) * params.predatorMaxForce * 5;
+          this.velocity.y = -Math.sin(angle) * params.predatorMaxForce * 5;
+        }
+      }
+
+      huntTarget(fishArray) {
+        // Simple hunt logic: target the closest fish
+        let minDist = Infinity;
+        let target = null;
+        fishArray.forEach(fish => {
+          if (!fish.alive) return;
+          const d = Math.hypot(this.position.x - fish.position.x, this.position.y - fish.position.y);
+          if (d < minDist) {
+            minDist = d;
+            target = fish;
+          }
+        });
+        return target;
+      }
+
+      attackFish(fish) {
+        // Damage is handled in Fish class
+        // Here, we can trigger additional effects if desired
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.position.x, this.position.y);
+        ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.moveTo(this.size, 0);
+        ctx.lineTo(-this.size, this.size / 2);
+        ctx.lineTo(-this.size, -this.size / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // Particle Effects
+    function spawnParticle(x, y, color, size, lifespan) {
+      particles.push(new Particle(x, y, color, size, lifespan));
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.update();
+        p.draw();
+        if (p.isDead()) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    // Predator Management
+    function addPredator(type = 'shark') {
+      predators.push(new Predator(type));
+    }
+
+    function removePredator() {
+      predators.pop();
+    }
+
+    // Reef Dots
+    function addReefDot(x, y) {
+      reefDots.push({ x, y });
+    }
+
+    function drawReefDots() {
+      reefDots.forEach(dot => {
+        ctx.fillStyle = '#00aaff';
+        ctx.fillRect(dot.x - params.reefDotSize / 2, dot.y - params.reefDotSize / 2, params.reefDotSize, params.reefDotSize);
+      });
+    }
+
+    // Lake and Islands already drawn on offscreen canvas
+    function drawLakeAndIslands() {
+      ctx.drawImage(offscreenCanvas, 0, 0);
+    }
+
+    // Food Management
+    function spawnFoodOffCoast() {
+      if (islands.length === 0) return;
+      const island = islands[Math.floor(Math.random() * islands.length)];
+      const centerX = island.reduce((sum, p) => sum + p.x, 0) / island.length;
+      const centerY = island.reduce((sum, p) => sum + p.y, 0) / island.length;
+
+      let radiusSum = 0;
+      island.forEach(p => {
+        radiusSum += Math.hypot(p.x - centerX, p.y - centerY);
+      });
+      const avgRadius = radiusSum / island.length;
+
+      const angle = Math.random() * 2 * Math.PI;
+      const foodRadius = avgRadius + randomInRange(10, 30);
+      const x = centerX + foodRadius * Math.cos(angle);
+      const y = centerY + foodRadius * Math.sin(angle);
+
+      // Activate a food from the pool
+      for (let f of foodPool) {
+        if (!f.active) {
+          f.activate(x, y);
+          foods.push(f);
+          break;
+        }
+      }
+    }
+
+    function updateFood() {
+      for (let i = foods.length - 1; i >= 0; i--) {
+        const f = foods[i];
+        if (f.active) {
+          f.update();
+          f.draw();
+        } else {
+          foods.splice(i, 1);
+        }
+      }
+    }
+
+    // Fish Management
+    function addFish() {
+      fishArray.push(new Fish());
+    }
+
+    function removeFish() {
+      fishArray.pop();
+    }
+
+    // Simulation Parameters Initialization
+    for (let i = 0; i < params.fishCount; i++) {
+      fishArray.push(new Fish());
+    }
+
+    // Initialize Predator
+    addPredator();
+
+    // Animation Loop
+    let stepCount = 0;
+    let epochCount = 0;
+    let cumulativeReward = 0;
+
+    function animate() {
+      params.frameCount++;
+      stepCount++;
+
+      // Update Day/Night Cycle
+      handleDayNightCycle();
+
+      // Clear Canvas with Lighting
+      ctx.fillStyle = params.isDay ? `rgba(30, 144, 255, ${params.lightingIntensity})` : `rgba(10, 21, 15, ${params.lightingIntensity})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw Lake and Islands
+      drawLakeAndIslands();
+
+      // Draw Reef Dots
+      drawReefDots();
+
+      // Draw and Update Particles
+      updateParticles();
+
+      // Spawn Food at Intervals
+      if (stepCount % params.foodSpawnInterval === 0) {
+        spawnFoodOffCoast();
+      }
+
+      // Update and Draw Food
+      updateFood();
+
+      // Update and Draw Predators
+      predators.forEach(predator => {
+        predator.update(fishArray);
+        predator.draw();
+      });
+
+      // Update and Draw Fish
+      fishArray.forEach(fish => {
+        fish.applyBehaviors(fishArray, predators);
+        fish.update(fishArray, predators);
+        fish.draw();
+      });
+
+      // Update Info Panel
+      let aliveCount = fishArray.filter(f => f.alive).length;
+      let predatorCount = predators.length;
+      let totalFish = fishArray.length;
+      let foodCount = foods.length;
+
+      document.getElementById("epochDisplay").textContent = epochCount.toString();
+      document.getElementById("aliveDisplay").textContent = aliveCount.toString();
+      document.getElementById("totalFish").textContent = totalFish.toString();
+      document.getElementById("foodCount").textContent = foodCount.toString();
+      document.getElementById("predatorCount").textContent = predatorCount.toString();
+
+      // Handle Epochs and Breeding
+      if (stepCount >= params.stepsPerEpoch) {
+        epochCount++;
+        updatePolicy();
+        breedNextGeneration();
+        respawnDeadFish();
+        stepCount = 0;
+        cumulativeReward = 0;
+      }
+
+      // Update Scoreboard
+      updateScoreboard();
+
+      requestAnimationFrame(animate);
+    }
+
+    // Handle Day/Night Cycle
+    function handleDayNightCycle() {
+      const cycleDuration = params.isDay ? params.dayDuration : params.nightDuration;
+      if (params.frameCount >= cycleDuration) {
+        params.isDay = !params.isDay;
+        params.frameCount = 0;
+        document.getElementById("dayNightStatus").textContent = params.isDay ? "Day" : "Night";
+      }
+      params.lightingIntensity = params.isDay ? 1.0 : 0.5;
+    }
+
+    // Update Policy based on Cumulative Reward
+    function updatePolicy() {
+      // Simple heuristic: If cumulativeReward > 0, slightly adjust weights
+      if (cumulativeReward > 0) {
+        params.w_alignment += params.learningRate * 0.1;
+        params.w_cohesion += params.learningRate * 0.1;
+        params.w_separation -= params.learningRate * 0.1;
+      } else {
+        params.w_alignment -= params.learningRate * 0.1;
+        params.w_cohesion -= params.learningRate * 0.1;
+        params.w_separation += params.learningRate * 0.1;
+      }
+
+      // Clamp values between 0 and 5
+      params.w_alignment = Math.max(0, Math.min(5, params.w_alignment));
+      params.w_cohesion = Math.max(0, Math.min(5, params.w_cohesion));
+      params.w_separation = Math.max(0, Math.min(5, params.w_separation));
+    }
+
+    // Breed Next Generation
+    function breedNextGeneration() {
+      // Sort fish by performance (foodEaten) as a proxy for fitness
+      const sorted = fishArray.slice().sort((a, b) => b.foodEaten - a.foodEaten);
+
+      // Take top two as parents
+      const parent1 = sorted[0];
+      const parent2 = sorted[1];
+
+      // Breed offspring for dead fish
+      fishArray.forEach(fish => {
+        if (!fish.alive) {
+          const child = Fish.reproduce(parent1, parent2);
+          fish.genes = child.genes;
+          fish.position = {
+            x: params.pondCenter.x + randomInRange(-params.pondRadius / 3, params.pondRadius / 3),
+            y: params.pondCenter.y + randomInRange(-params.pondRadius / 3, params.pondRadius / 3),
+          };
+          fish.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+          fish.hunger = params.fishMaxHunger;
+          fish.health = fish.genes.health;
+          fish.alive = true;
+          fish.deathFade = 0;
+          fish.foodEaten = 0;
+          fish.epochsSurvived = 0;
+        }
+      });
+    }
+
+    // Respawn Dead Fish
+    function respawnDeadFish() {
+      fishArray.forEach(fish => {
+        if (!fish.alive) {
+          fish.position.x = params.pondCenter.x + randomInRange(-params.pondRadius / 3, params.pondRadius / 3);
+          fish.position.y = params.pondCenter.y + randomInRange(-params.pondRadius / 3, params.pondRadius / 3);
+          fish.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+          fish.hunger = params.fishMaxHunger;
+          fish.health = fish.genes.health;
+          fish.alive = true;
+          fish.deathFade = 0;
+          fish.foodEaten = 0;
+          fish.epochsSurvived = 0;
+        } else {
+          fish.epochsSurvived++;
+        }
+      });
+    }
+
+    // Update Scoreboard
+    function updateScoreboard() {
+      const tbody = document.getElementById("scoreboardBody");
+      tbody.innerHTML = "";
+
+      const sortedFish = fishArray.slice().sort((a, b) => b.foodEaten - a.foodEaten);
+      sortedFish.forEach(fish => {
+        const learningPercent = fish.epochsSurvived * 10 + fish.foodEaten * 2;
+        const hue = params.fishBaseColor + fish.epochsSurvived * 40;
+        const colorBox = `<div style="width:20px;height:10px;background:hsl(${hue},100%,50%)"></div>`;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${fish.fishID}</td>
+          <td>${colorBox}</td>
+          <td>${fish.epochsSurvived}</td>
+          <td>${fish.foodEaten}</td>
+          <td>${fish.hunger.toFixed(2)}</td>
+          <td>${fish.health.toFixed(2)}</td>
+          <td>${learningPercent}%</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Reset Simulation
+    function resetSimulation() {
+      // Clear arrays
+      fishArray.length = 0;
+      predators.length = 0;
+      foods.length = 0;
+      reefDots.length = 0;
+      particles.length = 0;
+
+      // Reset IDs
+      Fish.latestID = 0;
+
+      // Reinitialize Lake and Islands
+      islands.length = 0;
+      offscreenCtx.clearRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+      generateLake();
+      drawPond();
+      generateIslands(params.islandCount);
+      offscreenCtx.drawImage(islandOffscreen, 0, 0);
+
+      // Reinitialize Fish
+      for (let i = 0; i < params.fishCount; i++) {
+        fishArray.push(new Fish());
+      }
+
+      // Reinitialize Predator
+      addPredator();
+
+      // Reset Counters
+      stepCount = 0;
+      epochCount = 0;
+      cumulativeReward = 0;
+    }
+
+    // Object Pool Management
+    function recycleFood() {
+      for (let f of foodPool) {
+        if (!f.active) {
+          foods.push(f);
+          break;
+        }
+      }
+    }
+
+    // Breeding and Genetic Algorithm
+    function breedNextGenerationGA() {
+      // Placeholder for more advanced genetic algorithms
+      // Currently handled in breedNextGeneration()
+    }
+
+    // Event Listeners for UI Controls
+    document.getElementById("maxSpeed").addEventListener("input", (e) => {
+      params.maxSpeed = parseFloat(e.target.value);
+    });
+    document.getElementById("maxForce").addEventListener("input", (e) => {
+      params.maxForce = parseFloat(e.target.value);
+    });
+    document.getElementById("sepWeight").addEventListener("input", (e) => {
+      params.separationWeight = parseFloat(e.target.value);
+    });
+    document.getElementById("alignWeight").addEventListener("input", (e) => {
+      params.w_alignment = parseFloat(e.target.value);
+    });
+    document.getElementById("cohWeight").addEventListener("input", (e) => {
+      params.w_cohesion = parseFloat(e.target.value);
+    });
+
+    // Toggle Hunger Display
+    document.getElementById("toggleHungerBtn").addEventListener("click", () => {
+      params.showHunger = !params.showHunger;
+      document.getElementById("toggleHungerBtn").textContent = params.showHunger ? "Hide Hunger" : "Show Hunger";
+    });
+
+    // Toggle Scoreboard
+    const scoreboard = document.getElementById("scoreboard");
+    const toggleScoreBtn = document.getElementById("toggleScoreboardBtn");
+    toggleScoreBtn.addEventListener("click", () => {
+      if (scoreboard.style.display === "none") {
+        scoreboard.style.display = "block";
+        toggleScoreBtn.textContent = "Hide Data Table";
+      } else {
+        scoreboard.style.display = "none";
+        toggleScoreBtn.textContent = "Show Data Table";
+      }
+    });
+
+    // Add/Remove Fish
+    document.getElementById("addFishBtn").addEventListener("click", () => {
+      addFish();
+    });
+    document.getElementById("removeFishBtn").addEventListener("click", () => {
+      removeFish();
+    });
+
+    // Add/Remove Predator
+    document.getElementById("addPredatorBtn").addEventListener("click", () => {
+      addPredator();
+    });
+    document.getElementById("removePredatorBtn").addEventListener("click", () => {
+      removePredator();
+    });
+
+    // Add/Remove Food
+    document.getElementById("addFoodBtn").addEventListener("click", () => {
+      spawnFoodOffCoast();
+    });
+    document.getElementById("removeFoodBtn").addEventListener("click", () => {
+      if (foods.length > 0) {
+        const f = foods.pop();
+        f.deactivate();
+      }
+    });
+
+    // Pause and Resume
+    let isPaused = false;
+    const pauseBtn = document.getElementById("pauseBtn");
+    pauseBtn.addEventListener("click", () => {
+      isPaused = !isPaused;
+      pauseBtn.textContent = isPaused ? "Resume" : "Pause";
+      if (!isPaused) animate();
+    });
+
+    // Reset Simulation
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      resetSimulation();
+    });
+
+    // Save State Modal
+    const saveModal = document.getElementById("saveModal");
+    const loadModal = document.getElementById("loadModal");
+    const saveStateBtn = document.getElementById("saveStateBtn");
+    const loadStateBtn = document.getElementById("loadStateBtn");
+    const closeSaveModal = document.getElementById("closeSaveModal");
+    const closeLoadModal = document.getElementById("closeLoadModal");
+    const copySaveDataBtn = document.getElementById("copySaveData");
+    const loadStateDataBtn = document.getElementById("loadState");
+
+    saveStateBtn.addEventListener("click", () => {
+      const state = {
+        fish: fishArray.map(f => ({
+          fishID: f.fishID,
+          position: f.position,
+          velocity: f.velocity,
+          acceleration: f.acceleration,
+          hunger: f.hunger,
+          health: f.health,
+          alive: f.alive,
+          deathFade: f.deathFade,
+          epochsSurvived: f.epochsSurvived,
+          foodEaten: f.foodEaten,
+          baseHue: f.baseHue,
+          bodyLength: f.bodyLength,
+          bodyWidth: f.bodyWidth,
+          genes: f.genes
+        })),
+        predators: predators.map(p => ({
+          type: p.type,
+          position: p.position,
+          velocity: p.velocity,
+          acceleration: p.acceleration,
+          size: p.size,
+          color: p.color
+        })),
+        foods: foods.map(f => ({
+          position: f.position,
+          size: f.size,
+          vel: f.vel,
+          active: f.active
+        })),
+        islands: islands,
+        reefDots: reefDots,
+        params: {
+          ...params
+        }
+      };
+      document.getElementById("saveData").value = JSON.stringify(state);
+      saveModal.style.display = "block";
+    });
+
+    loadStateBtn.addEventListener("click", () => {
+      loadModal.style.display = "block";
+    });
+
+    closeSaveModal.addEventListener("click", () => {
+      saveModal.style.display = "none";
+    });
+    closeLoadModal.addEventListener("click", () => {
+      loadModal.style.display = "none";
+    });
+
+    copySaveDataBtn.addEventListener("click", () => {
+      const saveData = document.getElementById("saveData");
+      saveData.select();
+      document.execCommand("copy");
+      alert("Save data copied to clipboard!");
+    });
+
+    loadStateDataBtn.addEventListener("click", () => {
+      const loadData = document.getElementById("loadData").value;
+      try {
+        const state = JSON.parse(loadData);
+        loadSimulationState(state);
+        loadModal.style.display = "none";
+      } catch (error) {
+        alert("Invalid JSON data!");
+      }
+    });
+
+    // Load Simulation State
+    function loadSimulationState(state) {
+      resetSimulation();
+
+      // Load Parameters
+      Object.assign(params, state.params);
+
+      // Load Islands
+      islands.length = 0;
+      state.islands.forEach(island => islands.push(island));
+      offscreenCtx.clearRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+      islands.forEach(points => {
+        islandCtx.beginPath();
+        islandCtx.moveTo(points[0].x, points[0].y);
+        points.forEach(point => islandCtx.lineTo(point.x, point.y));
+        islandCtx.closePath();
+        islandCtx.fillStyle = "#006400";
+        islandCtx.fill();
+        islandCtx.strokeStyle = "#FFFFFF";
+        islandCtx.lineWidth = 2;
+        islandCtx.stroke();
+      });
+      drawPond();
+      offscreenCtx.drawImage(islandOffscreen, 0, 0);
+
+      // Load Fish
+      fishArray.length = 0;
+      state.fish.forEach(f => {
+        const fish = new Fish();
+        fish.fishID = f.fishID;
+        fish.position = f.position;
+        fish.velocity = f.velocity;
+        fish.acceleration = f.acceleration;
+        fish.hunger = f.hunger;
+        fish.health = f.health;
+        fish.alive = f.alive;
+        fish.deathFade = f.deathFade;
+        fish.epochsSurvived = f.epochsSurvived;
+        fish.foodEaten = f.foodEaten;
+        fish.baseHue = f.baseHue;
+        fish.bodyLength = f.bodyLength;
+        fish.bodyWidth = f.bodyWidth;
+        fish.genes = f.genes;
+        fishArray.push(fish);
+      });
+
+      // Load Predators
+      predators.length = 0;
+      state.predators.forEach(p => {
+        const predator = new Predator(p.type);
+        predator.position = p.position;
+        predator.velocity = p.velocity;
+        predator.acceleration = p.acceleration;
+        predator.size = p.size;
+        predator.color = p.color;
+        predators.push(predator);
+      });
+
+      // Load Foods
+      foods.length = 0;
+      state.foods.forEach(f => {
+        const food = foodPool.find(fo => !fo.active);
+        if (food) {
+          food.position = f.position;
+          food.size = f.size;
+          food.vel = f.vel;
+          food.active = f.active;
+          if (f.active) foods.push(food);
+        }
+      });
+
+      // Load Reef Dots
+      reefDots.length = 0;
+      state.reefDots.forEach(dot => reefDots.push(dot));
+
+      // Load Additional Params if necessary
+      // ...
+
+      // Update Scoreboard
+      updateScoreboard();
+    }
+
+    // Toggle Day/Night
+    const dayNightToggle = document.getElementById("dayNightToggle");
+    dayNightToggle.addEventListener("click", () => {
+      params.isDay = !params.isDay;
+      params.frameCount = 0;
+      document.getElementById("dayNightStatus").textContent = params.isDay ? "Day" : "Night";
+    });
+
+    // Error Handling
+    window.addEventListener('error', function (e) {
+      console.error("Error in simulation:", e.message);
+      alert("An error occurred in the simulation. Check the console for details.");
+    });
+
+    // Start Animation
+    animate();
+
+    // Additional Enhancements:
+    // - Dynamic Lighting: Simulated via lightingIntensity affecting the pond color
+    // - Animated Elements: Particles are used for visual effects
+    // - User-Driven Actions: Add/Remove fish, predators, food via buttons
+    // - Genetic Diversity Visualization: Fish colors change based on epochs survived
+    // - Environmental Changes: Day/Night cycle implemented
+  </script>
+</body>
+</html>

@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Enhanced Fish Schooling Simulation with Predator and Simple RL</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #0a150f;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100vh;
+    }
+    #controlPanel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-family: sans-serif;
+      font-size: 12px;
+      z-index: 999;
+    }
+    #controlPanel label {
+      display: block;
+      margin: 5px 0 2px;
+    }
+    #controlPanel input {
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+<canvas id="simulationCanvas"></canvas>
+<div id="controlPanel">
+  <label>Max Speed: <input type="range" id="maxSpeed" min="0.1" max="3" step="0.1" value="1"/></label>
+  <label>Max Force: <input type="range" id="maxForce" min="0.01" max="0.5" step="0.01" value="0.05"/></label>
+  <label>Separation Weight: <input type="range" id="sepWeight" min="0" max="5" step="0.1" value="0.5"/></label>
+  <label>Alignment Weight: <input type="range" id="alignWeight" min="0" max="5" step="0.1" value="1.0"/></label>
+  <label>Cohesion Weight: <input type="range" id="cohWeight" min="0" max="5" step="0.1" value="0.5"/></label>
+  <label>Predator Speed: <input type="range" id="predSpeed" min="0.1" max="3" step="0.1" value="1.5"/></label>
+  <label>Predator Aggression: <input type="range" id="predAggression" min="0" max="5" step="0.1" value="1.0"/></label>
+</div>
+<script>
+  const canvas = document.getElementById("simulationCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  // Simulation Parameters
+  const params = {
+    pondRadius: Math.min(canvas.width, canvas.height) / 3 + 150,
+    pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
+    fishCount: 200,
+    maxSpeed: 1,
+    maxForce: 0.05,
+    perceptionRadius: 50,
+    separationDistance: 10,
+    edgeBuffer: 20,
+    islandRepelRadius: 50,
+    islandRepelForce: 0.2,
+    edgeRepelForce: 0.1,
+    separationWeight: 0.5,
+    alignmentWeight: 1.0,
+    cohesionWeight: 0.5,
+    currentStrength: 0.001,
+    currentRandomness: 0.25,
+    islandCount: 10,
+    fishColor: "#cc7a16",
+    pondColor: "#151841",
+    islandColor: "#228B22",
+    predatorSpeed: 1.5,
+    predatorAggression: 1.0,
+    // RL-related parameters
+    fishPolicyParams: {
+      w_alignment: 1.0,
+      w_cohesion: 0.5,
+      w_separation: 0.5
+    },
+    predatorPolicyParams: {
+      w_chase: 1.0
+    },
+    learningRate: 0.01,  // simplistic learning rate for gradient update
+    stepsPerUpdate: 500  // how many steps before we do a policy gradient update
+  };
+
+  const fishArray = [];
+  const islands = [];
+  let predator;
+
+  // RL Buffers
+  let stepCount = 0;
+  let fishRewards = 0;
+  let predatorRewards = 0;
+  // We'll collect "experiences" as states and actions
+  // For simplicity, we do not store large histories. We'll just do a simplistic gradient based on average reward every few steps.
+
+  // Utility function to generate random numbers
+  function randomInRange(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  // Generate a more organic lake shape using smaller angle increments & random radius variations
+  function generateLake() {
+    const points = [];
+    for (let angle = 0; angle < 360; angle += 5) {
+      const rad = (Math.PI / 180) * angle;
+      const radius = params.pondRadius + randomInRange(-30, 30);
+      const x = params.pondCenter.x + radius * Math.cos(rad);
+      const y = params.pondCenter.y + radius * Math.sin(rad);
+      points.push({ x, y });
+    }
+    return points;
+  }
+
+  const lakeOutline = generateLake();
+
+  function drawPond() {
+    ctx.fillStyle = params.pondColor;
+    ctx.beginPath();
+    ctx.moveTo(lakeOutline[0].x, lakeOutline[0].y);
+    lakeOutline.forEach((point) => ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Generate randomized islands
+  function generateIslands(count) {
+    for (let i = 0; i < count; i++) {
+      const islandCenter = {
+        x: randomInRange(
+          params.pondCenter.x - params.pondRadius / 2,
+          params.pondCenter.x + params.pondRadius / 2
+        ),
+        y: randomInRange(
+          params.pondCenter.y - params.pondRadius / 2,
+          params.pondCenter.y + params.pondRadius / 2
+        ),
+      };
+      const points = [];
+      const size = randomInRange(20, 50);
+
+      for (let angle = 0; angle < 360; angle += 20) {
+        const rad = (Math.PI / 180) * angle;
+        const radius = size + randomInRange(-10, 10);
+        const x = islandCenter.x + Math.cos(rad) * radius;
+        const y = islandCenter.y + Math.sin(rad) * radius;
+        points.push({ x, y });
+      }
+      islands.push(points);
+    }
+  }
+
+  function drawIslands() {
+    ctx.fillStyle = params.islandColor;
+    islands.forEach((points) => {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      points.forEach((point) => ctx.lineTo(point.x, point.y));
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  class Fish {
+    constructor() {
+      this.position = {
+        x: params.pondCenter.x +
+          randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+        y: params.pondCenter.y +
+          randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+      };
+      this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+      this.acceleration = { x: 0, y: 0 };
+    }
+
+    update() {
+      this.velocity.x += this.acceleration.x;
+      this.velocity.y += this.acceleration.y;
+
+      const speed = Math.hypot(this.velocity.x, this.velocity.y);
+      if (speed > params.maxSpeed) {
+        this.velocity.x = (this.velocity.x / speed) * params.maxSpeed;
+        this.velocity.y = (this.velocity.y / speed) * params.maxSpeed;
+      }
+
+      this.position.x += this.velocity.x;
+      this.position.y += this.velocity.y;
+
+      this.acceleration.x = 0;
+      this.acceleration.y = 0;
+
+      this.avoidEdges();
+      this.avoidIslands();
+    }
+
+    applyBehaviors(fishArray, predator) {
+      // Normally we used params.alignmentWeight, etc.
+      // Here, let's incorporate "policy parameters" for a simplistic RL approach.
+      const w_align = params.fishPolicyParams.w_alignment;
+      const w_coh = params.fishPolicyParams.w_cohesion;
+      const w_sep = params.fishPolicyParams.w_separation;
+
+      const alignment = this.alignment(fishArray);
+      const cohesion = this.cohesion(fishArray);
+      const separation = this.separation(fishArray);
+      const predAvoid = this.avoidPredator(predator);
+
+      this.acceleration.x +=
+        alignment.x * (w_align) +
+        cohesion.x * (w_coh) +
+        separation.x * (w_sep) +
+        predAvoid.x * 1.5;
+      this.acceleration.y +=
+        alignment.y * (w_align) +
+        cohesion.y * (w_coh) +
+        separation.y * (w_sep) +
+        predAvoid.y * 1.5;
+
+      // Apply "current" flow
+      this.acceleration.x +=
+        ((-params.currentStrength +
+          randomInRange(-params.currentRandomness, params.currentRandomness)) *
+          (this.position.y - params.pondCenter.y)) /
+        params.pondRadius;
+      this.acceleration.y +=
+        ((params.currentStrength +
+          randomInRange(-params.currentRandomness, params.currentRandomness)) *
+          (this.position.x - params.pondCenter.x)) /
+        params.pondRadius;
+    }
+
+    avoidPredator(predator) {
+      const dist = Math.hypot(
+        this.position.x - predator.position.x,
+        this.position.y - predator.position.y
+      );
+      if (dist < params.perceptionRadius * 2) {
+        let steer = {
+          x: this.position.x - predator.position.x,
+          y: this.position.y - predator.position.y
+        };
+        const mag = Math.hypot(steer.x, steer.y);
+        steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
+        steer.y = (steer.y / mag) * params.maxSpeed - this.velocity.y;
+        return steer;
+      }
+      return { x: 0, y: 0 };
+    }
+
+    separation(fishArray) {
+      let steer = { x: 0, y: 0 };
+      let count = 0;
+      fishArray.forEach((other) => {
+        const d = Math.hypot(
+          this.position.x - other.position.x,
+          this.position.y - other.position.y
+        );
+        if (d > 0 && d < params.separationDistance) {
+          const diff = {
+            x: this.position.x - other.position.x,
+            y: this.position.y - other.position.y,
+          };
+          const dist = Math.hypot(diff.x, diff.y);
+          diff.x /= dist;
+          diff.y /= dist;
+          steer.x += diff.x;
+          steer.y += diff.y;
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        steer.x /= count;
+        steer.y /= count;
+      }
+
+      const mag = Math.hypot(steer.x, steer.y);
+      if (mag > 0) {
+        steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
+        steer.y = (steer.y / mag) * params.maxSpeed - this.velocity.y;
+      }
+
+      return steer;
+    }
+
+    avoidEdges() {
+      const distToCenter = Math.hypot(
+        this.position.x - params.pondCenter.x,
+        this.position.y - params.pondCenter.y
+      );
+      if (distToCenter > params.pondRadius - params.edgeBuffer) {
+        const angle = Math.atan2(
+          this.position.y - params.pondCenter.y,
+          this.position.x - params.pondCenter.x
+        );
+        const force =
+          (distToCenter - (params.pondRadius - params.edgeBuffer)) *
+          params.edgeRepelForce;
+        this.acceleration.x -= Math.cos(angle) * force;
+        this.acceleration.y -= Math.sin(angle) * force;
+      }
+    }
+
+    avoidIslands() {
+      islands.forEach((points) => {
+        const centerX =
+          points.reduce((sum, p) => sum + p.x, 0) / points.length;
+        const centerY =
+          points.reduce((sum, p) => sum + p.y, 0) / points.length;
+
+        const distToIsland = Math.hypot(
+          this.position.x - centerX,
+          this.position.y - centerY
+        );
+        if (distToIsland < params.islandRepelRadius) {
+          const angle = Math.atan2(
+            this.position.y - centerY,
+            this.position.x - centerX
+          );
+          const force =
+            (params.islandRepelRadius - distToIsland) * params.islandRepelForce;
+          this.acceleration.x += Math.cos(angle) * force;
+          this.acceleration.y += Math.sin(angle) * force;
+        }
+      });
+    }
+
+    alignment(fishArray) {
+      let sum = { x: 0, y: 0 };
+      let count = 0;
+
+      fishArray.forEach((other) => {
+        const d = Math.hypot(
+          this.position.x - other.position.x,
+          this.position.y - other.position.y
+        );
+        if (d > 0 && d < params.perceptionRadius) {
+          sum.x += other.velocity.x;
+          sum.y += other.velocity.y;
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        sum.x /= count;
+        sum.y /= count;
+
+        const mag = Math.hypot(sum.x, sum.y);
+        if (mag > 0) {
+          sum.x = (sum.x / mag) * params.maxSpeed;
+          sum.y = (sum.y / mag) * params.maxSpeed;
+        }
+
+        const steer = {
+          x: sum.x - this.velocity.x,
+          y: sum.y - this.velocity.y,
+        };
+
+        const steerMag = Math.hypot(steer.x, steer.y);
+        if (steerMag > params.maxForce) {
+          steer.x = (steer.x / steerMag) * params.maxForce;
+          steer.y = (steer.y / steerMag) * params.maxForce;
+        }
+        return steer;
+      }
+
+      return { x: 0, y: 0 };
+    }
+
+    cohesion(fishArray) {
+      let sum = { x: 0, y: 0 };
+      let count = 0;
+
+      fishArray.forEach((other) => {
+        const d = Math.hypot(
+          this.position.x - other.position.x,
+          this.position.y - other.position.y
+        );
+        if (d > 0 && d < params.perceptionRadius) {
+          sum.x += other.position.x;
+          sum.y += other.position.y;
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        sum.x /= count;
+        sum.y /= count;
+
+        const desired = {
+          x: sum.x - this.position.x,
+          y: sum.y - this.position.y,
+        };
+
+        const mag = Math.hypot(desired.x, desired.y);
+        if (mag > 0) {
+          desired.x = (desired.x / mag) * params.maxSpeed;
+          desired.y = (desired.y / mag) * params.maxSpeed;
+        }
+
+        const steer = {
+          x: desired.x - this.velocity.x,
+          y: desired.y - this.velocity.y,
+        };
+
+        const steerMag = Math.hypot(steer.x, steer.y);
+        if (steerMag > params.maxForce) {
+          steer.x = (steer.x / steerMag) * params.maxForce;
+          steer.y = (steer.y / steerMag) * params.maxForce;
+        }
+        return steer;
+      }
+
+      return { x: 0, y: 0 };
+    }
+
+    draw() {
+      ctx.save();
+      ctx.translate(this.position.x, this.position.y);
+      ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+      ctx.fillStyle = params.fishColor;
+      ctx.beginPath();
+      ctx.moveTo(0, 0); // Nose
+      ctx.lineTo(-10, 5); // Tail bottom
+      ctx.lineTo(-10, -5); // Tail top
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  class Predator {
+    constructor() {
+      this.position = {
+        x: params.pondCenter.x,
+        y: params.pondCenter.y
+      };
+      this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+      this.acceleration = { x: 0, y: 0 };
+    }
+
+    update(fishArray) {
+      // Predator uses a simple linear "policy"
+      // Features: direction towards average fish position
+      // Action: accelerate towards it scaled by w_chase
+      let target = this.huntTarget(fishArray);
+      const w_chase = params.predatorPolicyParams.w_chase;
+      this.acceleration.x = target.x * w_chase;
+      this.acceleration.y = target.y * w_chase;
+
+      this.velocity.x += this.acceleration.x;
+      this.velocity.y += this.acceleration.y;
+
+      // Limit speed
+      const speed = Math.hypot(this.velocity.x, this.velocity.y);
+      if (speed > params.predatorSpeed) {
+        this.velocity.x = (this.velocity.x / speed) * params.predatorSpeed;
+        this.velocity.y = (this.velocity.y / speed) * params.predatorSpeed;
+      }
+
+      this.position.x += this.velocity.x;
+      this.position.y += this.velocity.y;
+
+      this.acceleration.x = 0;
+      this.acceleration.y = 0;
+
+      // Keep predator inside pond
+      const distToCenter = Math.hypot(
+        this.position.x - params.pondCenter.x,
+        this.position.y - params.pondCenter.y
+      );
+      if (distToCenter > params.pondRadius) {
+        const angle = Math.atan2(
+          this.position.y - params.pondCenter.y,
+          this.position.x - params.pondCenter.x
+        );
+        this.velocity.x = -Math.cos(angle) * 0.5;
+        this.velocity.y = -Math.sin(angle) * 0.5;
+      }
+    }
+
+    huntTarget(fishArray) {
+      let sumX = 0;
+      let sumY = 0;
+      fishArray.forEach(f => {
+        sumX += f.position.x;
+        sumY += f.position.y;
+      });
+      const avgX = sumX / fishArray.length;
+      const avgY = sumY / fishArray.length;
+      const dirX = avgX - this.position.x;
+      const dirY = avgY - this.position.y;
+      const mag = Math.hypot(dirX, dirY);
+      if (mag > 0) {
+        // Predator tries to move closer to fish
+        return { x: (dirX / mag), y: (dirY / mag) };
+      }
+      return { x: 0, y: 0 };
+    }
+
+    draw() {
+      ctx.save();
+      ctx.translate(this.position.x, this.position.y);
+      ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+      ctx.fillStyle = "red";
+      ctx.beginPath();
+      ctx.moveTo(10,0); // Nose
+      ctx.lineTo(-10, 10); // Tail bottom
+      ctx.lineTo(-10, -10); // Tail top
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Initialize environment
+  generateIslands(params.islandCount);
+  for (let i = 0; i < params.fishCount; i++) {
+    fishArray.push(new Fish());
+  }
+  predator = new Predator();
+
+  function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawPond();
+    drawIslands();
+
+    fishArray.forEach((fish) => {
+      fish.applyBehaviors(fishArray, predator);
+      fish.update();
+      fish.draw();
+    });
+
+    predator.update(fishArray);
+    predator.draw();
+
+    // Collect rewards:
+    // Simple heuristic:
+    // - Fish reward: average distance of fish to predator (further is better for fish) and closeness to each other.
+    // - Predator reward: negative of that distance (predator wants to be close).
+    // Compute average fish-to-predator distance and fish-to-fish cohesion
+    let sumDistToPred = 0;
+    let fishX = 0; let fishY = 0;
+    fishArray.forEach(f => {
+      const dist = Math.hypot(f.position.x - predator.position.x, f.position.y - predator.position.y);
+      sumDistToPred += dist;
+      fishX += f.position.x; fishY += f.position.y;
+    });
+    fishX /= fishArray.length;
+    fishY /= fishArray.length;
+    // Measure fish cohesion: average distance to center of mass
+    let sumCohesion = 0;
+    fishArray.forEach(f => {
+      sumCohesion += Math.hypot(f.position.x - fishX, f.position.y - fishY);
+    });
+    sumCohesion /= fishArray.length;
+    // Reward fish for being cohesive (less sumCohesion = better) and away from predator
+    const avgDistToPred = sumDistToPred / fishArray.length;
+    const fishRewardStep = (avgDistToPred * 0.01) - (sumCohesion * 0.001);
+    fishRewards += fishRewardStep;
+    // Predator reward: wants to minimize avgDistToPred
+    const predatorRewardStep = -avgDistToPred * 0.01;
+    predatorRewards += predatorRewardStep;
+
+    stepCount++;
+    if (stepCount % params.stepsPerUpdate === 0) {
+      // After certain steps, update policies based on rewards
+      updatePolicies();
+      fishRewards = 0;
+      predatorRewards = 0;
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  // Very simplistic policy update:
+  // We'll treat the reward as a signal to nudge weights in the direction that would improve it.
+  // For fish: If fishRewards is positive, increase cohesion/alignment weights slightly.
+  // If negative, reduce them.
+  //
+  // For predator: If predatorRewards is positive (it got closer), increase w_chase. Otherwise, decrease it.
+  //
+  // This is not a proper gradient-based RL update (we're not using log probabilities or real gradients),
+  // but just a naive heuristic to show how we might adapt weights over time.
+  function updatePolicies() {
+    // Fish wants to maximize fishRewards
+    // If fishRewards > 0, fish are doing well: maybe increase alignment and cohesion.
+    // If fishRewards < 0, they're doing poorly: increase separation to try something different.
+    const lr = params.learningRate;
+    if (fishRewards > 0) {
+      params.fishPolicyParams.w_alignment += lr * 0.1;
+      params.fishPolicyParams.w_cohesion += lr * 0.1;
+      params.fishPolicyParams.w_separation -= lr * 0.1;
+    } else {
+      params.fishPolicyParams.w_alignment -= lr * 0.1;
+      params.fishPolicyParams.w_cohesion -= lr * 0.1;
+      params.fishPolicyParams.w_separation += lr * 0.1;
+    }
+
+    // Predator wants to maximize predatorRewards
+    // If predatorRewards is negative (means it's far), try to be more aggressive.
+    // If somehow positive (unlikely in this setup), reduce w_chase.
+    if (predatorRewards < 0) {
+      // Predator not close enough, increase chase
+      params.predatorPolicyParams.w_chase += lr * 0.1;
+    } else {
+      // Predator got too close? (unlikely but let's include logic)
+      params.predatorPolicyParams.w_chase -= lr * 0.1;
+    }
+
+    // Clamp weights to reasonable ranges
+    params.fishPolicyParams.w_alignment = Math.max(0, Math.min(5, params.fishPolicyParams.w_alignment));
+    params.fishPolicyParams.w_cohesion = Math.max(0, Math.min(5, params.fishPolicyParams.w_cohesion));
+    params.fishPolicyParams.w_separation = Math.max(0, Math.min(5, params.fishPolicyParams.w_separation));
+    params.predatorPolicyParams.w_chase = Math.max(0, Math.min(5, params.predatorPolicyParams.w_chase));
+  }
+
+  animate();
+
+  // GUI handlers
+  document.getElementById("maxSpeed").addEventListener("input", (e) => {
+    params.maxSpeed = parseFloat(e.target.value);
+  });
+  document.getElementById("maxForce").addEventListener("input", (e) => {
+    params.maxForce = parseFloat(e.target.value);
+  });
+  document.getElementById("sepWeight").addEventListener("input", (e) => {
+    params.separationWeight = parseFloat(e.target.value);
+  });
+  document.getElementById("alignWeight").addEventListener("input", (e) => {
+    params.alignmentWeight = parseFloat(e.target.value);
+  });
+  document.getElementById("cohWeight").addEventListener("input", (e) => {
+    params.cohesionWeight = parseFloat(e.target.value);
+  });
+  document.getElementById("predSpeed").addEventListener("input", (e) => {
+    params.predatorSpeed = parseFloat(e.target.value);
+  });
+  document.getElementById("predAggression").addEventListener("input", (e) => {
+    params.predatorAggression = parseFloat(e.target.value);
+  });
+</script>
+</body>
+</html>

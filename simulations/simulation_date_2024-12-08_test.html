@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* General Styles */
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #000;
+      color: #fff;
+    }
+
+    /* Header */
+    .navbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1em;
+      background-color: #111;
+    }
+
+    .search-bar {
+      background: #222;
+      border: none;
+      color: #fff;
+      padding: 0.5em;
+      border-radius: 5px;
+    }
+
+    .account-btn {
+      padding: 0.5em 1em;
+      background: #444;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    /* Crypto Overview */
+    .crypto-overview {
+      text-align: center;
+      padding: 2em;
+    }
+
+    .crypto-overview h2 {
+      font-size: 2em;
+    }
+
+    .positive {
+      color: #0f0;
+    }
+
+    .negative {
+      color: #f00;
+    }
+
+    /* Cryptocurrency Table */
+    .crypto-table {
+      margin: 2em;
+    }
+
+    .crypto-table table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .crypto-table th, .crypto-table td {
+      padding: 1em;
+      text-align: left;
+    }
+
+    .crypto-table tr:nth-child(even) {
+      background-color: #222;
+    }
+
+    /* Latest News */
+    .latest-news {
+      margin: 2em;
+    }
+
+    /* XRP Chart */
+    .xrp-chart {
+      padding: 2em;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <nav class="navbar">
+      <div class="logo">Crypto Dashboard</div>
+      <input type="text" placeholder="Search" class="search-bar">
+      <div class="account-btn">Account</div>
+    </nav>
+  </header>
+
+  <!-- Main Section -->
+  <main>
+    <!-- Title and Current Value -->
+    <section class="crypto-overview">
+      <h1>Crypto</h1>
+      <h2>$72.07 <span class="positive">+0.06%</span></h2>
+      <canvas id="cryptoChart"></canvas>
+    </section>
+
+    <!-- Cryptocurrency Table -->
+    <section class="crypto-table">
+      <h3>Explore Cryptocurrencies</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Symbol</th>
+            <th>Price</th>
+            <th>Today</th>
+            <th>Market Cap</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Solana</td>
+            <td>SOL</td>
+            <td>$255.61</td>
+            <td class="positive">+0.42%</td>
+            <td>112.34B</td>
+          </tr>
+          <tr>
+            <td>Dogecoin</td>
+            <td>DOGE</td>
+            <td>$0.46116</td>
+            <td class="negative">-1.33%</td>
+            <td>64.52B</td>
+          </tr>
+          <!-- Add more rows as needed -->
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Latest in Crypto -->
+    <section class="latest-news">
+      <h3>Latest in Crypto</h3>
+      <article>
+        <h4>Bitcoin Whales Ramp Up Accumulation</h4>
+        <p>Bitcoinist</p>
+      </article>
+    </section>
+  </main>
+
+  <!-- XRP Chart Section -->
+  <section class="xrp-chart">
+    <h2>XRP $2.563 <span class="negative">-0.34%</span></h2>
+    <canvas id="xrpChart"></canvas>
+    <button>Add Data</button>
+  </section>
+
+  <script>
+    // Sample Line Charts using Chart.js
+    document.addEventListener('DOMContentLoaded', function () {
+      const ctxCrypto = document.getElementById('cryptoChart').getContext('2d');
+      const cryptoChart = new Chart(ctxCrypto, {
+        type: 'line',
+        data: {
+          labels: ['1h', '2h', '3h', '4h'], // Example time labels
+          datasets: [{
+            label: 'Crypto Value',
+            data: [70, 72, 74, 72], // Example data
+            borderColor: 'lime',
+            backgroundColor: 'rgba(0, 255, 0, 0.1)',
+            fill: true,
+          }],
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { grid: { color: '#222' } },
+            y: { grid: { color: '#222' } },
+          },
+        },
+      });
+
+      const ctxXRP = document.getElementById('xrpChart').getContext('2d');
+      const xrpChart = new Chart(ctxXRP, {
+        type: 'line',
+        data: {
+          labels: ['10:00', '10:10', '10:20', '10:30'], // Example time labels
+          datasets: [{
+            label: 'XRP Value',
+            data: [2.55, 2.57, 2.59, 2.56], // Example data
+            borderColor: 'pink',
+            backgroundColor: 'rgba(255, 0, 255, 0.1)',
+            fill: true,
+          }],
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { grid: { color: '#222' } },
+            y: { grid: { color: '#222' } },
+          },
+        },
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Stick Figure RL</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #fafafa;
+    font-family: Arial, sans-serif;
+  }
+  #simulationCanvas {
+    display: block;
+    margin: 0 auto;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+  }
+  #controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(255,255,255,0.8);
+    padding: 10px;
+    border-radius: 5px;
+    z-index: 999;
+  }
+  #controls button {
+    padding: 6px 12px;
+    margin: 5px;
+    border: none;
+    background: #e0e0e0;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-size: 14px;
+  }
+  #controls button:hover {
+    background-color: #ddd;
+  }
+  #controls button[aria-pressed="true"] {
+    background: #ccc;
+  }
+</style>
+</head>
+<body>
+<div id="controls" aria-label="Simulation Controls">
+  <button id="startBtn" aria-pressed="true">Running</button>
+  <button id="stopBtn" aria-pressed="false">Stop</button>
+  <div>Episodes: <span id="episodeCount">0</span></div>
+</div>
+<canvas id="simulationCanvas" role="img" aria-label="Stick figure physics simulation"></canvas>
+
+<script>
+/**
+ * This code attempts a naive policy gradient approach to teach a stick figure to stand and move forward.
+ * It uses a simple neural network policy and updates it after each episode via a simplified REINFORCE algorithm.
+ */
+
+// Matter.js aliases
+const {
+  Engine,
+  Render,
+  Runner,
+  World,
+  Bodies,
+  Body,
+  Composite,
+  Constraint,
+  Mouse,
+  MouseConstraint,
+  Events
+} = Matter;
+
+let engine, world, render, runner;
+let canvas = document.getElementById('simulationCanvas');
+let episodeCount = 0;
+document.getElementById('episodeCount').innerText = episodeCount;
+
+let stickFigureParts = {};
+let stickFigure;
+let episodeStep = 0;
+const maxEpisodeSteps = 600; // about 10 seconds at 60fps
+const actionsPerStep = 1;
+let episodeData = [];
+
+let policy; // Our policy network
+let learningRate = 0.001;
+let gamma = 0.99; // discount factor
+
+// Policy network: a small MLP with one hidden layer
+// state dim: (torso angle, torso angular vel, torso x vel, leftArm angle, rightArm angle, leftLeg angle, rightLeg angle)
+const stateDim = 7;
+const actionDim = 4;
+const hiddenDim = 16;
+
+// Initialize network
+policy = {
+  // Initialize weights randomly
+  W1: initRandMatrix(hiddenDim, stateDim),
+  b1: initRandArray(hiddenDim),
+  W2: initRandMatrix(actionDim, hiddenDim),
+  b2: initRandArray(actionDim)
+};
+
+let running = true;
+
+function init() {
+  engine = Engine.create();
+  world = engine.world;
+  engine.world.gravity.y = 1; // Earth-like gravity
+  adjustCanvasSize();
+
+  render = Render.create({
+    canvas: canvas,
+    engine: engine,
+    options: {
+      width: canvas.width,
+      height: canvas.height,
+      wireframes: false,
+      background: 'transparent'
+    }
+  });
+  Render.run(render);
+
+  runner = Runner.create();
+  Runner.run(runner, engine);
+
+  createEnvironment(canvas.width, canvas.height);
+  createStickFigure(canvas.width / 2, canvas.height - 300);
+
+  const mouse = Mouse.create(render.canvas);
+  const mouseConstraint = MouseConstraint.create(engine, {
+    mouse: mouse,
+    constraint: { stiffness: 0.1, render: { visible: false } }
+  });
+  World.add(world, mouseConstraint);
+
+  window.addEventListener('resize', () => {
+    adjustCanvasSize();
+    Render.lookAt(render, {
+      min: { x: 0, y: 0 },
+      max: { x: canvas.width, y: canvas.height }
+    });
+  });
+
+  initControls();
+
+  // Main loop
+  Events.on(engine, 'afterUpdate', () => {
+    if (!running) return;
+
+    episodeStep++;
+    // Get state
+    const state = getState();
+    // Sample action from policy
+    const [action, logProb] = policyForward(state);
+    // Apply action (set target angles)
+    applyAction(action);
+
+    // Compute reward
+    const reward = computeReward();
+    episodeData.push({ state, action, reward, logProb });
+
+    if (episodeStep >= maxEpisodeSteps) {
+      endEpisode();
+    }
+  });
+}
+
+function endEpisode() {
+  // Compute returns and update policy
+  const returns = [];
+  let G = 0;
+  for (let t = episodeData.length - 1; t >= 0; t--) {
+    G = episodeData[t].reward + gamma * G;
+    returns[t] = G;
+  }
+  returns.reverse();
+
+  // Normalize returns for stability
+  const meanR = mean(returns);
+  const stdR = std(returns, meanR);
+  for (let i = 0; i < returns.length; i++) {
+    returns[i] = (returns[i] - meanR) / (stdR + 1e-5);
+  }
+
+  // Gradient ascent on policy params
+  const grads = {
+    W1: zeroMatrix(hiddenDim, stateDim),
+    b1: zeroArray(hiddenDim),
+    W2: zeroMatrix(actionDim, hiddenDim),
+    b2: zeroArray(actionDim)
+  };
+
+  for (let t = 0; t < episodeData.length; t++) {
+    const { state, action, logProb } = episodeData[t];
+    const R = returns[t];
+
+    // Forward pass to get intermediate values
+    const [z1, a1, out] = forwardPass(policy, state);
+    for (let i = 0; i < actionDim; i++) {
+      const diff = (action[i] - out[i]);
+      const gradOut = diff * R;
+      // Backprop to W2, b2
+      for (let j = 0; j < hiddenDim; j++) {
+        grads.W2[i][j] += gradOut * a1[j];
+      }
+      grads.b2[i] += gradOut;
+      // Backprop through a1
+      for (let j = 0; j < hiddenDim; j++) {
+        const gradA1 = gradOut * policy.W2[i][j];
+        const gradZ1 = gradA1 * dRelu(z1[j]);
+        for (let k = 0; k < stateDim; k++) {
+          grads.W1[j][k] += gradZ1 * state[k];
+        }
+        grads.b1[j] += gradZ1;
+      }
+    }
+  }
+
+  // Update policy parameters
+  for (let i = 0; i < hiddenDim; i++) {
+    for (let j = 0; j < stateDim; j++) {
+      policy.W1[i][j] += learningRate * grads.W1[i][j];
+    }
+    policy.b1[i] += learningRate * grads.b1[i];
+  }
+  for (let i = 0; i < actionDim; i++) {
+    for (let j = 0; j < hiddenDim; j++) {
+      policy.W2[i][j] += learningRate * grads.W2[i][j];
+    }
+    policy.b2[i] += learningRate * grads.b2[i];
+  }
+
+  // Increment episode count and reset simulation
+  episodeCount++;
+  document.getElementById('episodeCount').innerText = episodeCount;
+  resetSimulation();
+}
+
+function resetSimulation() {
+  // Remove old figure and environment
+  World.clear(world, false);
+  Engine.clear(engine);
+
+  createEnvironment(canvas.width, canvas.height);
+  createStickFigure(canvas.width / 2, canvas.height - 300);
+
+  episodeStep = 0;
+  episodeData = [];
+}
+
+// Compute reward: encourages upright posture and moving forward
+function computeReward() {
+  const { torso } = stickFigureParts;
+  const angle = normalizeAngle(torso.angle);
+  const xVel = torso.velocity.x;
+
+  // Reward: forward velocity - angle deviation
+  // wants figure to stand upright (angle ~ 0) and move forward (xVel > 0)
+  const reward = xVel - Math.abs(angle)*0.5;
+  return reward;
+}
+
+function applyAction(action) {
+  // Action are target angles for arms and legs: [leftArm, rightArm, leftLeg, rightLeg]
+  // We'll apply torques to move each limb towards the target angle relative to the torso
+  // Increased stiffness 'k' from 0.02 to 0.1 for stronger torque
+  // Further increased stiffness to 0.2 for legs to prevent sinking
+  const armStiffness = 0.05; // Moderate stiffness for arms
+  const legStiffness = 0.2; // Higher stiffness for legs
+  const damp = 0.1;
+
+  const { torso, leftArm, rightArm, leftLeg, rightLeg } = stickFigureParts;
+  applyJointControl(torso, leftArm, action[0], armStiffness, damp);
+  applyJointControl(torso, rightArm, action[1], armStiffness, damp);
+  applyJointControl(torso, leftLeg, action[2], legStiffness, damp);
+  applyJointControl(torso, rightLeg, action[3], legStiffness, damp);
+}
+
+function applyJointControl(bodyA, bodyB, targetRelAngle, k, d) {
+  // Current angle of bodyB relative to bodyA
+  const currentAngle = normalizeAngle(bodyB.angle - bodyA.angle);
+  const angleError = normalizeAngle(targetRelAngle - currentAngle);
+
+  // Apply torque proportional to angleError and angular velocity error
+  const relativeAngVel = bodyB.angularVelocity - bodyA.angularVelocity;
+  const torque = k * angleError - d * relativeAngVel;
+
+  Body.applyTorque(bodyB, torque);
+  Body.applyTorque(bodyA, -torque); // equal and opposite to keep system stable
+}
+
+function getState() {
+  const { torso, leftArm, rightArm, leftLeg, rightLeg } = stickFigureParts;
+  const torsoAngle = normalizeAngle(torso.angle);
+  const torsoAngVel = torso.angularVelocity;
+  const torsoXVel = torso.velocity.x;
+
+  const laAngle = normalizeAngle(leftArm.angle - torso.angle);
+  const raAngle = normalizeAngle(rightArm.angle - torso.angle);
+  const llAngle = normalizeAngle(leftLeg.angle - torso.angle);
+  const rlAngle = normalizeAngle(rightLeg.angle - torso.angle);
+
+  return [torsoAngle, torsoAngVel, torsoXVel, laAngle, raAngle, llAngle, rlAngle];
+}
+
+// Policy forward pass
+function policyForward(state) {
+  const [z1, a1, out] = forwardPass(policy, state);
+  // For simplicity, we treat out as deterministic actions
+  // logProb is fake here, we just store something for shape
+  const logProb = 0; // Not a proper probability
+  return [out, logProb];
+}
+
+function forwardPass(p, x) {
+  const z1 = mulAdd(p.W1, x, p.b1);
+  const a1 = reluArray(z1);
+  const z2 = mulAdd(p.W2, a1, p.b2);
+  // Output are desired angles: limit them within [-pi/2, pi/2]
+  for (let i = 0; i < z2.length; i++) {
+    z2[i] = Math.max(-Math.PI/2, Math.min(Math.PI/2, z2[i]));
+  }
+  return [z1, a1, z2];
+}
+
+// Math helpers
+function initRandMatrix(rows, cols) {
+  const m = [];
+  for (let i = 0; i < rows; i++) {
+    m[i] = [];
+    for (let j = 0; j < cols; j++) {
+      m[i][j] = (Math.random()-0.5)*0.1;
+    }
+  }
+  return m;
+}
+
+function initRandArray(size) {
+  const a = [];
+  for (let i = 0; i < size; i++) a[i] = 0;
+  return a;
+}
+
+function mulAdd(W, x, b) {
+  const out = [];
+  for (let i = 0; i < W.length; i++) {
+    let sum = b[i];
+    for (let j = 0; j < x.length; j++) {
+      sum += W[i][j]*x[j];
+    }
+    out[i] = sum;
+  }
+  return out;
+}
+
+function reluArray(arr) {
+  const out = [];
+  for (let i=0; i<arr.length; i++) {
+    out[i] = Math.max(0, arr[i]);
+  }
+  return out;
+}
+
+function dRelu(x) {
+  return x > 0 ? 1 : 0;
+}
+
+function zeroMatrix(rows, cols) {
+  const m = [];
+  for (let i = 0; i < rows; i++) {
+    m[i] = [];
+    for (let j = 0; j < cols; j++) {
+      m[i][j] = 0;
+    }
+  }
+  return m;
+}
+
+function zeroArray(size) {
+  const a = [];
+  for (let i = 0; i < size; i++) a[i] = 0;
+  return a;
+}
+
+function mean(arr) {
+  let s = 0;
+  for (let i=0; i<arr.length; i++) s+= arr[i];
+  return s/arr.length;
+}
+
+function std(arr, m) {
+  let s=0;
+  for (let i=0; i<arr.length; i++) {
+    let d = arr[i]-m; s+=d*d;
+  }
+  return Math.sqrt(s/(arr.length+1e-9));
+}
+
+function normalizeAngle(angle) {
+  // Normalize angle to [-pi, pi]
+  angle = angle % (2*Math.PI);
+  if (angle > Math.PI) angle -= 2*Math.PI;
+  else if (angle <= -Math.PI) angle += 2*Math.PI;
+  return angle;
+}
+
+// Environment and figure
+function adjustCanvasSize() {
+  canvas.width = window.innerWidth * 0.9;
+  canvas.height = window.innerHeight * 0.9;
+}
+
+function createEnvironment(width, height) {
+  const wallThickness = 100;
+  const ground = Bodies.rectangle(width / 2, height - 50, width, wallThickness, {
+    isStatic: true,
+    render: { fillStyle: '#888' }
+  });
+  const leftWall = Bodies.rectangle(-wallThickness / 2, height / 2, wallThickness, height, {
+    isStatic: true,
+    render: { fillStyle: '#888' }
+  });
+  const rightWall = Bodies.rectangle(width + wallThickness / 2, height / 2, wallThickness, height, {
+    isStatic: true,
+    render: { fillStyle: '#888' }
+  });
+  const ceiling = Bodies.rectangle(width / 2, -wallThickness / 2, width, wallThickness, {
+    isStatic: true,
+    render: { fillStyle: '#888' }
+  });
+
+  // Platform
+  const platform = Bodies.rectangle(width / 2, height / 2, 200, 20, {
+    isStatic: true,
+    angle: 0.1,
+    render: { fillStyle: '#555' }
+  });
+
+  World.add(world, [ground, leftWall, rightWall, ceiling, platform]);
+}
+
+function createStickFigure(x, y) {
+  const headRadius = 20;
+  const torsoWidth = 20;
+  const torsoHeight = 60;
+  const limbWidth = 10;
+  const limbLength = 40;
+
+  // Create torso and head as a compound body
+  const torso = Bodies.rectangle(x, y, torsoWidth, torsoHeight, {
+    inertia: Infinity,
+    friction: 0.5,
+    angularDamping: 0.5,
+    render: { fillStyle: '#333' }
+  });
+  const head = Bodies.circle(x, y - torsoHeight / 2 - headRadius, headRadius, {
+    inertia: Infinity,
+    friction: 0.5,
+    render: { fillStyle: '#333' }
+  });
+
+  const torsoWithHead = Body.create({
+    parts: [torso, head],
+    inertia: Infinity,
+    friction: 0.5,
+    angularDamping: 0.5,
+    render: { fillStyle: '#333' }
+  });
+
+  const leftArm = Bodies.rectangle(x - 25, y - 10, limbWidth, limbLength, {
+    friction: 0.5,
+    render: { fillStyle: '#333' }
+  });
+  const rightArm = Bodies.rectangle(x + 25, y - 10, limbWidth, limbLength, {
+    friction: 0.5,
+    render: { fillStyle: '#333' }
+  });
+  const leftLeg = Bodies.rectangle(x - 10, y + 50, limbWidth, limbLength, {
+    friction: 0.5,
+    render: { fillStyle: '#333' }
+  });
+  const rightLeg = Bodies.rectangle(x + 10, y + 50, limbWidth, limbLength, {
+    friction: 0.5,
+    render: { fillStyle: '#333' }
+  });
+
+  // Removed neck constraint as head is now part of torso
+  const leftShoulder = Constraint.create({
+    bodyA: torsoWithHead,
+    bodyB: leftArm,
+    pointA: { x: -torsoWidth / 2, y: -torsoHeight / 3 },
+    stiffness: 0.9
+  });
+  const rightShoulder = Constraint.create({
+    bodyA: torsoWithHead,
+    bodyB: rightArm,
+    pointA: { x: torsoWidth / 2, y: -torsoHeight / 3 },
+    stiffness: 0.9
+  });
+  const leftHip = Constraint.create({
+    bodyA: torsoWithHead,
+    bodyB: leftLeg,
+    pointA: { x: -torsoWidth / 4, y: torsoHeight / 2 },
+    stiffness: 0.9
+  });
+  const rightHip = Constraint.create({
+    bodyA: torsoWithHead,
+    bodyB: rightLeg,
+    pointA: { x: torsoWidth / 4, y: torsoHeight / 2 },
+    stiffness: 0.9
+  });
+
+  const figure = Composite.create({ label: 'StickFigure' });
+  Composite.add(figure, [
+    torsoWithHead,
+    leftArm,
+    rightArm,
+    leftLeg,
+    rightLeg,
+    leftShoulder,
+    rightShoulder,
+    leftHip,
+    rightHip
+  ]);
+  World.add(world, figure);
+
+  stickFigure = figure;
+  stickFigureParts = { torso: torsoWithHead, leftArm, rightArm, leftLeg, rightLeg };
+}
+
+function initControls() {
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+
+  startBtn.addEventListener('click', () => {
+    startBtn.setAttribute('aria-pressed', 'true');
+    stopBtn.setAttribute('aria-pressed', 'false');
+    running = true;
+  });
+
+  stopBtn.addEventListener('click', () => {
+    stopBtn.setAttribute('aria-pressed', 'true');
+    startBtn.setAttribute('aria-pressed', 'false');
+    running = false;
+  });
+}
+
+// Start the simulation
+window.onload = init;
+</script>
+</body>
+</html>

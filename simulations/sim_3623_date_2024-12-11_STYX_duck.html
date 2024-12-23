@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duck Simulation</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #e0f7fa;
+      font-family: Arial, sans-serif;
+    }
+
+    #simulationCanvas {
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    #ui h1 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    #ui button {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 8px 12px;
+      font-size: 14px;
+      color: white;
+      background: #00796b;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #ui button:hover {
+      background: #004d40;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="simulationCanvas"></canvas>
+  <div id="ui">
+    <h1>Duck Simulation</h1>
+    <p>Ducks: <span id="duckCount">50</span></p>
+    <p>Predators: <span id="predatorCount">5</span></p>
+    <button id="resetSimulation">Reset Simulation</button>
+  </div>
+
+  <script>
+    // Canvas setup
+    const canvas = document.getElementById('simulationCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Simulation configuration
+    const CONFIG = {
+      TERRAIN_SIZE: 2000,
+      TILE_SIZE: 50,
+      DUCK_COUNT: 50,
+      PREDATOR_COUNT: 5,
+      DAY_LENGTH: 6000, // milliseconds
+    };
+
+    // Simulation state
+    const terrain = [];
+    const ducks = [];
+    const predators = [];
+    let weather = 'clear';
+    let timeOfDay = 0;
+
+    // Helper functions
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function generateTerrain() {
+      const size = CONFIG.TERRAIN_SIZE / CONFIG.TILE_SIZE;
+      for (let x = 0; x < size; x++) {
+        terrain[x] = [];
+        for (let y = 0; y < size; y++) {
+          const elevation = Math.sin(x * 0.1) * Math.cos(y * 0.1);
+          terrain[x][y] = {
+            elevation,
+            type: elevation < -0.3 ? 'water' : elevation < 0.3 ? 'grassland' : 'woodland',
+          };
+        }
+      }
+    }
+
+    function spawnDucks() {
+      for (let i = 0; i < CONFIG.DUCK_COUNT; i++) {
+        ducks.push({
+          x: randomInRange(0, CONFIG.TERRAIN_SIZE),
+          y: randomInRange(0, CONFIG.TERRAIN_SIZE),
+          energy: 100,
+          alive: true,
+        });
+      }
+    }
+
+    function spawnPredators() {
+      for (let i = 0; i < CONFIG.PREDATOR_COUNT; i++) {
+        predators.push({
+          x: randomInRange(0, CONFIG.TERRAIN_SIZE),
+          y: randomInRange(0, CONFIG.TERRAIN_SIZE),
+          state: 'patrolling',
+        });
+      }
+    }
+
+    function updateDucks(delta) {
+      ducks.forEach((duck) => {
+        if (!duck.alive) return;
+
+        // Move randomly
+        duck.x += randomInRange(-10, 10) * delta;
+        duck.y += randomInRange(-10, 10) * delta;
+
+        // Keep ducks within bounds
+        duck.x = Math.max(0, Math.min(duck.x, CONFIG.TERRAIN_SIZE));
+        duck.y = Math.max(0, Math.min(duck.y, CONFIG.TERRAIN_SIZE));
+
+        // Decrease energy and check if the duck is alive
+        duck.energy -= 0.1 * delta;
+        if (duck.energy <= 0) {
+          duck.alive = false;
+        }
+      });
+    }
+
+    function updatePredators(delta) {
+      predators.forEach((predator) => {
+        // Patrol behavior (random movement)
+        predator.x += randomInRange(-20, 20) * delta;
+        predator.y += randomInRange(-20, 20) * delta;
+
+        // Keep predators within bounds
+        predator.x = Math.max(0, Math.min(predator.x, CONFIG.TERRAIN_SIZE));
+        predator.y = Math.max(0, Math.min(predator.y, CONFIG.TERRAIN_SIZE));
+      });
+    }
+
+    function drawTerrain() {
+      const size = terrain.length;
+      const tileSize = CONFIG.TILE_SIZE;
+      for (let x = 0; x < size; x++) {
+        for (let y = 0; y < size; y++) {
+          ctx.fillStyle = terrain[x][y].type === 'water' ? '#3399ff' : terrain[x][y].type === 'grassland' ? '#66cc33' : '#339900';
+          ctx.fillRect(x * tileSize - camera.x, y * tileSize - camera.y, tileSize, tileSize);
+        }
+      }
+    }
+
+    function drawDucks() {
+      ctx.fillStyle = 'brown';
+      ducks.forEach((duck) => {
+        if (!duck.alive) return;
+        ctx.beginPath();
+        ctx.arc(
+          (duck.x / CONFIG.TERRAIN_SIZE) * canvas.width,
+          (duck.y / CONFIG.TERRAIN_SIZE) * canvas.height,
+          4,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      });
+    }
+
+    function drawPredators() {
+      ctx.fillStyle = 'red';
+      predators.forEach((predator) => {
+        ctx.beginPath();
+        ctx.arc(
+          (predator.x / CONFIG.TERRAIN_SIZE) * canvas.width,
+          (predator.y / CONFIG.TERRAIN_SIZE) * canvas.height,
+          6,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      });
+    }
+
+    function mainLoop(timestamp) {
+      const delta = (timestamp - lastTimestamp) / 1000; // delta time in seconds
+      lastTimestamp = timestamp;
+
+      // Update simulation
+      updateDucks(delta);
+      updatePredators(delta);
+
+      // Render simulation
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawTerrain();
+      drawDucks();
+      drawPredators();
+
+      requestAnimationFrame(mainLoop);
+    }
+
+    // Initialize simulation
+    generateTerrain();
+    spawnDucks();
+    spawnPredators();
+    let lastTimestamp = 0;
+    requestAnimationFrame(mainLoop);
+  </script>
+</body>
+</html>

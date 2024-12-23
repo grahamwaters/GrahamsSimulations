@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Koi Fish with Islands, Predator, and Food</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #0a150f;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100vh;
+    }
+
+    #controlPanel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      z-index: 999;
+    }
+
+    #scoreboard {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      background: rgba(255,255,255,0.9);
+      overflow-y: auto;
+      font-size: 12px;
+      z-index: 998;
+      border-top: 1px solid #ccc;
+    }
+
+    #scoreboard table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    #scoreboard th, #scoreboard td {
+      text-align: left;
+      padding: 5px;
+      border-bottom: 1px solid #ccc;
+    }
+
+    #infoPanel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      z-index: 1000;
+    }
+
+    #infoPanel h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+
+    #infoPanel .param {
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="simulationCanvas"></canvas>
+
+<div id="infoPanel">
+  <h2>Info</h2>
+  <div>Epoch: <span id="epochDisplay">0</span></div>
+  <div>Alive Fish: <span id="aliveDisplay">0</span>/<span id="totalFish"></span></div>
+  <div>Food Count: <span id="foodCount"></span></div>
+</div>
+
+<div id="controlPanel">
+  <label>Max Speed: <input type="range" id="maxSpeed" min="0.1" max="3" step="0.1" value="1"/></label>
+  <label>Max Force: <input type="range" id="maxForce" min="0.01" max="0.5" step="0.01" value="0.05"/></label>
+  <label>Separation Weight: <input type="range" id="sepWeight" min="0" max="5" step="0.1" value="0.5"/></label>
+  <label>Alignment Weight: <input type="range" id="alignWeight" min="0" max="5" step="0.1" value="1.0"/></label>
+  <label>Cohesion Weight: <input type="range" id="cohWeight" min="0" max="5" step="0.1" value="0.5"/></label>
+</div>
+
+<div id="scoreboard">
+  <table>
+    <thead>
+      <tr>
+        <th>Fish ID</th>
+        <th>Color</th>
+        <th>Epochs Survived</th>
+        <th>Food Eaten</th>
+        <th>Hunger</th>
+        <th>Learning %</th>
+      </tr>
+    </thead>
+    <tbody id="scoreboardBody"></tbody>
+  </table>
+</div>
+
+<script>
+  const canvas = document.getElementById("simulationCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const params = {
+    pondRadius: Math.min(canvas.width, canvas.height) / 3 + 150,
+    pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
+    fishCount: 50,
+    maxSpeed: 1,
+    maxForce: 0.05,
+    perceptionRadius: 50,
+    separationDistance: 10,
+    edgeBuffer: 20,
+    islandRepelRadius: 50,
+    islandRepelForce: 0.2,
+    edgeRepelForce: 0.1,
+    separationWeight: 0.5,
+    alignmentWeight: 1.0,
+    cohesionWeight: 0.5,
+    currentStrength: 0.001,
+    currentRandomness: 0.25,
+    islandCount: 5,
+    fishBaseColor: 30,
+    fishMaxHunger: 1.0,
+    hungerDecreaseRate: 0.001,
+    edgeDangerMultiplier: 2.0,
+    foodSpawnInterval: 100,
+    foodRestoreAmount: 0.5,
+    stepsPerEpoch: 2000,
+    learningRate: 0.01,
+    w_alignment: 1.0,
+    w_cohesion: 0.5,
+    w_separation: 0.5,
+    predatorSpeed: 0.5,
+    predatorMaxForce: 0.02
+  };
+
+  let stepCount = 0;
+  let epochCount = 0;
+
+  const fishArray = [];
+  const islands = [];
+  const foods = [];
+
+  let cumulativeReward = 0;
+  let fishIDCounter = 1;
+
+  // Predator
+  let predator;
+
+  function randomInRange(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  function generateLake() {
+    const points = [];
+    for (let angle = 0; angle < 360; angle += 5) {
+      const rad = (Math.PI / 180) * angle;
+      const radius = params.pondRadius + randomInRange(-30, 30);
+      const x = params.pondCenter.x + radius * Math.cos(rad);
+      const y = params.pondCenter.y + radius * Math.sin(rad);
+      points.push({ x, y });
+    }
+    return points;
+  }
+  const lakeOutline = generateLake();
+
+  function drawPond() {
+    ctx.fillStyle = "#151841";
+    ctx.beginPath();
+    ctx.moveTo(lakeOutline[0].x, lakeOutline[0].y);
+    lakeOutline.forEach((point) => ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function generateIslands(count) {
+    for (let i = 0; i < count; i++) {
+      const islandCenter = {
+        x: randomInRange(
+          params.pondCenter.x - params.pondRadius / 2,
+          params.pondCenter.x + params.pondRadius / 2
+        ),
+        y: randomInRange(
+          params.pondCenter.y - params.pondRadius / 2,
+          params.pondCenter.y + params.pondRadius / 2
+        ),
+      };
+      const points = [];
+      const size = randomInRange(20, 50);
+
+      for (let angle = 0; angle < 360; angle += 20) {
+        const rad = (Math.PI / 180) * angle;
+        const radius = size + randomInRange(-10, 10);
+        const x = islandCenter.x + Math.cos(rad) * radius;
+        const y = islandCenter.y + Math.sin(rad) * radius;
+        points.push({ x, y });
+      }
+      islands.push(points);
+    }
+  }
+
+  function drawIslands() {
+    ctx.fillStyle = "#228B22";
+    islands.forEach((points) => {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      points.forEach((point) => ctx.lineTo(point.x, point.y));
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  class Food {
+    constructor(x, y) {
+      this.position = { x, y };
+      this.size = 5;
+    }
+    draw() {
+      ctx.fillStyle = "yellow";
+      ctx.beginPath();
+      ctx.arc(this.position.x, this.position.y, this.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function spawnFoodOnIsland() {
+    if (islands.length === 0) return;
+    const island = islands[Math.floor(Math.random() * islands.length)];
+    // Approximate island center
+    const centerX = island.reduce((sum, p) => sum + p.x, 0) / island.length;
+    const centerY = island.reduce((sum, p) => sum + p.y, 0) / island.length;
+    // Small random offset
+    const x = centerX + randomInRange(-10,10);
+    const y = centerY + randomInRange(-10,10);
+    foods.push(new Food(x, y));
+  }
+
+  class Fish {
+    constructor() {
+      this.fishID = fishIDCounter++;
+      this.position = {
+        x: params.pondCenter.x + randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+        y: params.pondCenter.y + randomInRange(-params.pondRadius / 2, params.pondRadius / 2),
+      };
+      this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
+      this.acceleration = { x: 0, y: 0 };
+      this.hunger = params.fishMaxHunger;
+      this.alive = true;
+      this.epochsSurvived = 0;
+      this.foodEaten = 0;
+      this.baseHue = params.fishBaseColor;
+    }
+
+    update(fishArray) {
+      this.velocity.x += this.acceleration.x;
+      this.velocity.y += this.acceleration.y;
+
+      const speed = Math.hypot(this.velocity.x, this.velocity.y);
+      if (speed > params.maxSpeed) {
+        this.velocity.x = (this.velocity.x / speed) * params.maxSpeed;
+        this.velocity.y = (this.velocity.y / speed) * params.maxSpeed;
+      }
+
+      this.position.x += this.velocity.x;
+      this.position.y += this.velocity.y;
+
+      this.acceleration.x = 0;
+      this.acceleration.y = 0;
+
+      this.decreaseHunger();
+      this.eatFood();
+
+      if (this.hunger <= 0 && this.alive) {
+        this.alive = false;
+      }
+
+      this.avoidEdges();
+      this.avoidIslands();
+    }
+
+    decreaseHunger() {
+      let decrease = params.hungerDecreaseRate;
+      const distToCenter = Math.hypot(this.position.x - params.pondCenter.x, this.position.y - params.pondCenter.y);
+      if (distToCenter > params.pondRadius - params.edgeBuffer) {
+        decrease *= params.edgeDangerMultiplier;
+      }
+      this.hunger -= decrease;
+      if (this.hunger < 0) this.hunger = 0;
+    }
+
+    eatFood() {
+      for (let i = foods.length - 1; i >= 0; i--) {
+        const f = foods[i];
+        const d = Math.hypot(this.position.x - f.position.x, this.position.y - f.position.y);
+        if (d < 10) {
+          this.hunger = Math.min(params.fishMaxHunger, this.hunger + params.foodRestoreAmount);
+          this.foodEaten++;
+          cumulativeReward += 1;
+          foods.splice(i, 1);
+        }
+      }
+    }
+
+    applyBehaviors(fishArray) {
+      const w_align = params.w_alignment;
+      const w_coh = params.w_cohesion;
+      const w_sep = params.w_separation;
+
+      const alignment = this.alignment(fishArray);
+      const cohesion = this.cohesion(fishArray);
+      const separation = this.separation(fishArray);
+      const foodSteer = this.seekFood();
+      const predAvoid = this.avoidPredator(predator);
+
+      this.acceleration.x +=
+        alignment.x * w_align +
+        cohesion.x * w_coh +
+        separation.x * w_sep +
+        foodSteer.x * 1.0 +
+        predAvoid.x * 2.0;
+      this.acceleration.y +=
+        alignment.y * w_align +
+        cohesion.y * w_coh +
+        separation.y * w_sep +
+        foodSteer.y * 1.0 +
+        predAvoid.y * 2.0;
+
+      // Current
+      this.acceleration.x +=
+        ((-params.currentStrength +
+          randomInRange(-params.currentRandomness, params.currentRandomness)) *
+          (this.position.y - params.pondCenter.y)) /
+        params.pondRadius;
+      this.acceleration.y +=
+        ((params.currentStrength +
+          randomInRange(-params.currentRandomness, params.currentRandomness)) *
+          (this.position.x - params.pondCenter.x)) /
+        params.pondRadius;
+    }
+
+    avoidPredator(predator) {
+      if (!predator) return { x:0, y:0 };
+      const dist = Math.hypot(
+        this.position.x - predator.position.x,
+        this.position.y - predator.position.y
+      );
+      if (dist < params.perceptionRadius * 2) {
+        let steer = {
+          x: this.position.x - predator.position.x,
+          y: this.position.y - predator.position.y
+        };
+        const mag = Math.hypot(steer.x, steer.y);
+        steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
+        steer.y = (steer.y / mag) * params.maxSpeed - this.velocity.y;
+        return steer;
+      }
+      return { x:0, y:0 };
+    }
+
+    seekFood() {
+      let nearestDist = Infinity;
+      let target = null;
+      for (let f of foods) {
+        const d = Math.hypot(this.position.x - f.position.x, this.position.y - f.position.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          target = f;
+        }
+      }
+      if (target) {
+        const desired = { x: target.position.x - this.position.x, y: target.position.y - this.position.y };
+        const mag = Math.hypot(desired.x, desired.y);
+        if (mag > 0) {
+          desired.x = (desired.x / mag) * params.maxSpeed;
+          desired.y = (desired.y / mag) * params.maxSpeed;
+        }
+        const steer = { x: desired.x - this.velocity.x, y: desired.y - this.velocity.y };
+        const smag = Math.hypot(steer.x, steer.y);
+        if (smag > params.maxForce) {
+          steer.x = (steer.x / smag) * params.maxForce;
+          steer.y = (steer.y / smag) * params.maxForce;
+        }
+        return steer;
+      }
+      return { x: 0, y: 0 };
+    }
+
+    separation(fishArray) {
+      let steer = { x: 0, y: 0 };
+      let count = 0;
+      fishArray.forEach((other) => {
+        if (!other.alive || other === this) return;
+        const d = Math.hypot(
+          this.position.x - other.position.x,
+          this.position.y - other.position.y
+        );
+        if (d > 0 && d < params.separationDistance) {
+          const diff = { x: this.position.x - other.position.x, y: this.position.y - other.position.y };
+          const dist = Math.hypot(diff.x, diff.y);
+          diff.x /= dist;
+          diff.y /= dist;
+          steer.x += diff.x;
+          steer.y += diff.y;
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        steer.x /= count;
+        steer.y /= count;
+      }
+
+      // Additional "shove" near food
+      foods.forEach(food => {
+        const d = Math.hypot(this.position.x - food.position.x, this.position.y - food.position.y);
+        if (d < 20) {
+          steer.x += (this.position.x - food.position.x) * 0.01;
+          steer.y += (this.position.y - food.position.y) * 0.01;
+        }
+      });
+
+      const mag = Math.hypot(steer.x, steer.y);
+      if (mag > 0) {
+        steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
+        steer.y = (steer.y / mag) * params.maxSpeed - this.velocity.y;
+      }
+
+      return steer;
+    }
+
+    avoidEdges() {
+      const distToCenter = Math.hypot(
+        this.position.x - params.pondCenter.x,
+        this.position.y - params.pondCenter.y
+      );
+      if (distToCenter > params.pondRadius - params.edgeBuffer) {
+        const angle = Math.atan2(
+          this.position.y - params.pondCenter.y,
+          this.position.x - params.pondCenter.x
+        );
+        const force =
+          (distToCenter - (params.pondRadius - params.edgeBuffer)) *
+          params.edgeRepelForce;
+        this.acceleration.x -= Math.cos(angle) * force;
+        this.acceleration.y -= Math.sin(angle) * force;
+      }
+    }
+
+    avoidIslands() {
+      islands.forEach((points) => {
+        const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+        const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+
+        const distToIsland = Math.hypot(this.position.x - centerX, this.position.y - centerY);
+        if (distToIsland < params.islandRepelRadius) {
+          const angle = Math.atan2(this.position.y - centerY, this.position.x - centerX);
+          const force = (params.islandRepelRadius - distToIsland) * params.islandRepelForce;
+          this.acceleration.x += Math.cos(angle) * force;
+          this.acceleration.y += Math.sin(angle) * force;
+        }
+      });
+    }
+
+    alignment(fishArray) {
+      let sum = { x: 0, y: 0 };
+      let count = 0;
+
+      fishArray.forEach((other) => {
+        if (!other.alive) return;
+        const d = Math.hypot(this.position.x - other.position.x, this.position.y - other.position.y);
+        if (d > 0 && d < params.perceptionRadius) {
+          sum.x += other.velocity.x;
+          sum.y += other.velocity.y;
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        sum.x /= count;
+        sum.y /= count;
+
+        const mag = Math.hypot(sum.x, sum.y);
+        if (mag > 0) {
+          sum.x = (sum.x / mag) * params.maxSpeed;
+          sum.y = (sum.y / mag) * params.maxSpeed;
+        }
+
+        const steer = { x: sum.x - this.velocity.x, y: sum.y - this.velocity.y };
+        const steerMag = Math.hypot(steer.x, steer.y);
+        if (steerMag > params.maxForce) {
+          steer.x = (steer.x / steerMag) * params.maxForce;
+          steer.y = (steer.y / steerMag) * params.maxForce;
+        }
+        return steer;
+      }
+
+      return { x: 0, y: 0 };
+    }
+
+    cohesion(fishArray) {
+      let sum = { x: 0, y: 0 };
+      let count = 0;
+
+      fishArray.forEach((other) => {
+        if (!other.alive) return;
+        const d = Math.hypot(this.position.x - other.position.x, this.position.y - other.position.y);
+        if (d > 0 && d < params.perceptionRadius) {
+          sum.x += other.position.x;
+          sum.y += other.position.y;
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        sum.x /= count;
+        sum.y /= count;
+
+        const desired = { x: sum.x - this.position.x, y: sum.y - this.position.y };
+        const mag = Math.hypot(desired.x, desired.y);
+        if (mag > 0) {
+          desired.x = (desired.x / mag) * params.maxSpeed;
+          desired.y = (desired.y / mag) * params.maxSpeed;
+        }
+
+        const steer = { x: desired.x - this.velocity.x, y: desired.y - this.velocity.y };
+        const steerMag = Math.hypot(steer.x, steer.y);
+        if (steerMag > params.maxForce) {
+          steer.x = (steer.x / steerMag) * params.maxForce;
+          steer.y = (steer.y / steerMag) * params.maxForce;
+        }
+        return steer;
+      }
+
+      return { x: 0, y: 0 };
+    }
+
+    draw() {
+      if (!this.alive) return;
+      ctx.save();
+      ctx.translate(this.position.x, this.position.y);
+      ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+      let hue = this.baseHue + this.epochsSurvived * 40;
+      ctx.fillStyle = `hsl(${hue},100%,50%)`;
+
+      ctx.beginPath();
+      ctx.moveTo(0, 0);  // Nose
+      ctx.quadraticCurveTo(-15, 10, -10, 5);
+      ctx.lineTo(-10, -5);
+      ctx.quadraticCurveTo(-15, -10, 0, 0);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.fillStyle = "white";
+      ctx.font = "10px sans-serif";
+      ctx.fillText(this.hunger.toFixed(2), this.position.x + 5, this.position.y - 5);
+    }
+  }
+
+  class Predator {
+    constructor() {
+      this.position = {
+        x: params.pondCenter.x,
+        y: params.pondCenter.y
+      };
+      this.velocity = { x: randomInRange(-1,1), y: randomInRange(-1,1) };
+      this.acceleration = { x:0, y:0 };
+    }
+
+    update(fishArray) {
+      let target = this.huntTarget(fishArray);
+      this.acceleration.x = target.x * params.predatorMaxForce;
+      this.acceleration.y = target.y * params.predatorMaxForce;
+
+      this.velocity.x += this.acceleration.x;
+      this.velocity.y += this.acceleration.y;
+
+      // Limit speed
+      const speed = Math.hypot(this.velocity.x, this.velocity.y);
+      if (speed > params.predatorSpeed) {
+        this.velocity.x = (this.velocity.x / speed) * params.predatorSpeed;
+        this.velocity.y = (this.velocity.y / speed) * params.predatorSpeed;
+      }
+
+      this.position.x += this.velocity.x;
+      this.position.y += this.velocity.y;
+
+      this.acceleration.x = 0;
+      this.acceleration.y = 0;
+
+      // Keep predator inside pond
+      const distToCenter = Math.hypot(
+        this.position.x - params.pondCenter.x,
+        this.position.y - params.pondCenter.y
+      );
+      if (distToCenter > params.pondRadius) {
+        const angle = Math.atan2(
+          this.position.y - params.pondCenter.y,
+          this.position.x - params.pondCenter.x
+        );
+        this.velocity.x = -Math.cos(angle) * 0.5;
+        this.velocity.y = -Math.sin(angle) * 0.5;
+      }
+    }
+
+    huntTarget(fishArray) {
+      let sumX = 0;
+      let sumY = 0;
+      let count = 0;
+      fishArray.forEach(f => {
+        if (f.alive) {
+          sumX += f.position.x;
+          sumY += f.position.y;
+          count++;
+        }
+      });
+      if (count > 0) {
+        const avgX = sumX / count;
+        const avgY = sumY / count;
+        const dirX = avgX - this.position.x;
+        const dirY = avgY - this.position.y;
+        const mag = Math.hypot(dirX, dirY);
+        if (mag > 0) {
+          return { x: dirX / mag, y: dirY / mag };
+        }
+      }
+      return { x:0, y:0 };
+    }
+
+    draw() {
+      ctx.save();
+      ctx.translate(this.position.x, this.position.y);
+      ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+      ctx.fillStyle = "red";
+      ctx.beginPath();
+      ctx.moveTo(10,0);
+      ctx.lineTo(-10,10);
+      ctx.lineTo(-10,-10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  generateIslands(params.islandCount);
+  for (let i = 0; i < params.fishCount; i++) {
+    fishArray.push(new Fish());
+  }
+
+  predator = new Predator();
+
+  function animate() {
+    stepCount++;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawPond();
+    drawIslands();
+
+    if (stepCount % params.foodSpawnInterval === 0) {
+      spawnFoodOnIsland();
+    }
+
+    foods.forEach(food => food.draw());
+
+    fishArray.forEach((fish) => {
+      if (fish.alive) {
+        fish.applyBehaviors(fishArray);
+        fish.update(fishArray);
+      }
+      fish.draw();
+    });
+
+    predator.update(fishArray);
+    predator.draw();
+
+    let aliveCount = fishArray.filter(f => f.alive).length;
+    cumulativeReward += aliveCount * 0.001;
+
+    document.getElementById("epochDisplay").textContent = epochCount.toString();
+    document.getElementById("aliveDisplay").textContent = aliveCount.toString();
+    document.getElementById("totalFish").textContent = fishArray.length.toString();
+    document.getElementById("foodCount").textContent = foods.length.toString();
+
+    if (stepCount >= params.stepsPerEpoch) {
+      epochCount++;
+      updatePolicy();
+      respawnDeadFish();
+      stepCount = 0;
+      cumulativeReward = 0;
+    }
+
+    updateScoreboard();
+
+    requestAnimationFrame(animate);
+  }
+
+  function updatePolicy() {
+    if (cumulativeReward > 0) {
+      params.w_alignment += params.learningRate * 0.1;
+      params.w_cohesion += params.learningRate * 0.1;
+      params.w_separation -= params.learningRate * 0.1;
+    } else {
+      params.w_alignment -= params.learningRate * 0.1;
+      params.w_cohesion -= params.learningRate * 0.1;
+      params.w_separation += params.learningRate * 0.1;
+    }
+
+    params.w_alignment = Math.max(0, Math.min(5, params.w_alignment));
+    params.w_cohesion = Math.max(0, Math.min(5, params.w_cohesion));
+    params.w_separation = Math.max(0, Math.min(5, params.w_separation));
+  }
+
+  function respawnDeadFish() {
+    fishArray.forEach((fish) => {
+      if (!fish.alive) {
+        fish.position.x = params.pondCenter.x + randomInRange(-params.pondRadius/3, params.pondRadius/3);
+        fish.position.y = params.pondCenter.y + randomInRange(-params.pondRadius/3, params.pondRadius/3);
+        fish.velocity.x = randomInRange(-1,1);
+        fish.velocity.y = randomInRange(-1,1);
+        fish.hunger = params.fishMaxHunger;
+        fish.alive = true;
+        fish.foodEaten = 0;
+        fish.epochsSurvived = 0;
+      } else {
+        fish.epochsSurvived++;
+      }
+    });
+  }
+
+  function updateScoreboard() {
+    const tbody = document.getElementById("scoreboardBody");
+    tbody.innerHTML = "";
+
+    const sortedFish = fishArray.slice().sort((a, b) => b.foodEaten - a.foodEaten);
+    sortedFish.forEach(fish => {
+      const tr = document.createElement("tr");
+      const learningPercent = fish.epochsSurvived * 10 + fish.foodEaten * 2;
+      const hue = params.fishBaseColor + fish.epochsSurvived * 40;
+      const colorBox = `<div style="width:20px;height:10px;background:hsl(${hue},100%,50%)"></div>`;
+
+      tr.innerHTML = `
+        <td>${fish.fishID}</td>
+        <td>${colorBox}</td>
+        <td>${fish.epochsSurvived}</td>
+        <td>${fish.foodEaten}</td>
+        <td>${fish.hunger.toFixed(2)}</td>
+        <td>${learningPercent}%</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  animate();
+
+  // GUI handlers
+  document.getElementById("maxSpeed").addEventListener("input", (e) => {
+    params.maxSpeed = parseFloat(e.target.value);
+  });
+  document.getElementById("maxForce").addEventListener("input", (e) => {
+    params.maxForce = parseFloat(e.target.value);
+  });
+  document.getElementById("sepWeight").addEventListener("input", (e) => {
+    params.separationWeight = parseFloat(e.target.value);
+  });
+  document.getElementById("alignWeight").addEventListener("input", (e) => {
+    params.alignmentWeight = parseFloat(e.target.value);
+  });
+  document.getElementById("cohWeight").addEventListener("input", (e) => {
+    params.cohesionWeight = parseFloat(e.target.value);
+  });
+</script>
+</body>
+</html>

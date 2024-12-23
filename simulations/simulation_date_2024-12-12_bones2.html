@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stick Figure Q-Learning</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f0;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="simulation"></canvas>
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('simulation');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 400;
+
+        // Physics variables
+        const gravity = 0.5;
+        const friction = 0.8;
+
+        // Objects in the simulation
+        const stickFigure = {
+            x: 400,
+            y: 300,
+            width: 20,
+            height: 60,
+            velocityX: 0,
+            velocityY: 0,
+            carrying: null,
+            armAngle: 0,
+            legAngle: 0,
+            isWalking: false,
+        };
+
+        const boulders = [
+            { x: 200, y: 340, radius: 10, velocityX: 0, velocityY: 0 },
+            { x: 300, y: 340, radius: 10, velocityX: 0, velocityY: 0 },
+            { x: 400, y: 340, radius: 10, velocityX: 0, velocityY: 0 },
+            { x: 500, y: 340, radius: 10, velocityX: 0, velocityY: 0 },
+        ];
+
+        const groundHeight = 390;
+
+        // Q-Learning setup
+        const actions = ['move_left', 'move_right', 'pick_up', 'drop', 'pause'];
+        const qTable = {};
+        let reward = 0;
+
+        function getState() {
+            return `${Math.round(stickFigure.x / 10)}_${stickFigure.carrying ? 1 : 0}`;
+        }
+
+        function chooseAction(state) {
+            if (!qTable[state]) qTable[state] = { move_left: 0, move_right: 0, pick_up: 0, drop: 0, pause: 0 };
+            const maxQ = Math.max(...Object.values(qTable[state]));
+            const bestActions = actions.filter(action => qTable[state][action] === maxQ);
+            return bestActions[Math.floor(Math.random() * bestActions.length)];
+        }
+
+        function updateQTable(state, action, newState, reward) {
+            if (!qTable[newState]) qTable[newState] = { move_left: 0, move_right: 0, pick_up: 0, drop: 0, pause: 0 };
+            const maxNextQ = Math.max(...Object.values(qTable[newState]));
+            qTable[state][action] = (1 - 0.1) * qTable[state][action] + 0.1 * (reward + 0.9 * maxNextQ);
+        }
+
+        function performAction(action) {
+            switch (action) {
+                case 'move_left':
+                    stickFigure.velocityX = -2;
+                    stickFigure.isWalking = true;
+                    break;
+                case 'move_right':
+                    stickFigure.velocityX = 2;
+                    stickFigure.isWalking = true;
+                    break;
+                case 'pick_up':
+                    if (!stickFigure.carrying) {
+                        boulders.forEach(boulder => {
+                            const distance = Math.hypot(stickFigure.x - boulder.x, stickFigure.y - boulder.y);
+                            if (distance < 20) {
+                                stickFigure.carrying = boulder;
+                            }
+                        });
+                    }
+                    break;
+                case 'drop':
+                    if (stickFigure.carrying) {
+                        stickFigure.carrying = null;
+                        reward += 10;
+                    }
+                    break;
+                case 'pause':
+                    stickFigure.velocityX = 0;
+                    stickFigure.isWalking = false;
+                    break;
+            }
+        }
+
+        function applyPhysics() {
+            // Apply gravity and friction to the stick figure
+            stickFigure.velocityY += gravity;
+            stickFigure.velocityX *= friction;
+            stickFigure.y += stickFigure.velocityY;
+            stickFigure.x += stickFigure.velocityX;
+
+            // Constrain stick figure to canvas bounds
+            if (stickFigure.x < 0) stickFigure.x = 0;
+            if (stickFigure.x + stickFigure.width > canvas.width) stickFigure.x = canvas.width - stickFigure.width;
+            if (stickFigure.y + stickFigure.height > groundHeight) {
+                stickFigure.y = groundHeight - stickFigure.height;
+                stickFigure.velocityY = 0;
+            }
+
+            // Apply physics to boulders
+            boulders.forEach(boulder => {
+                boulder.velocityY += gravity;
+                boulder.x += boulder.velocityX;
+                boulder.y += boulder.velocityY;
+
+                // Constrain boulders to canvas bounds
+                if (boulder.y + boulder.radius > groundHeight) {
+                    boulder.y = groundHeight - boulder.radius;
+                    boulder.velocityY = 0;
+                }
+            });
+
+            // Move carried boulder with stick figure
+            if (stickFigure.carrying) {
+                stickFigure.carrying.x = stickFigure.x;
+                stickFigure.carrying.y = stickFigure.y - stickFigure.height / 2;
+            }
+
+            // Update animation angles
+            if (stickFigure.isWalking) {
+                stickFigure.armAngle = Math.sin(Date.now() / 100) * 15;
+                stickFigure.legAngle = Math.cos(Date.now() / 100) * 15;
+            } else {
+                stickFigure.armAngle = 0;
+                stickFigure.legAngle = 0;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw ground
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, groundHeight, canvas.width, canvas.height - groundHeight);
+
+            // Draw boulders
+            ctx.fillStyle = '#a9a9a9';
+            boulders.forEach(boulder => {
+                ctx.beginPath();
+                ctx.arc(boulder.x, boulder.y, boulder.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Draw stick figure
+            ctx.fillStyle = '#000';
+
+            // Draw head
+            ctx.beginPath();
+            ctx.arc(stickFigure.x + stickFigure.width / 2, stickFigure.y - 10, 10, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw body
+            ctx.beginPath();
+            ctx.moveTo(stickFigure.x + stickFigure.width / 2, stickFigure.y);
+            ctx.lineTo(stickFigure.x + stickFigure.width / 2, stickFigure.y + stickFigure.height / 2);
+            ctx.stroke();
+
+            // Draw arms
+            ctx.beginPath();
+            ctx.moveTo(stickFigure.x + stickFigure.width / 2, stickFigure.y + 10);
+            ctx.lineTo(stickFigure.x + stickFigure.width / 2 - 10 - stickFigure.armAngle, stickFigure.y + 20);
+            ctx.moveTo(stickFigure.x + stickFigure.width / 2, stickFigure.y + 10);
+            ctx.lineTo(stickFigure.x + stickFigure.width / 2 + 10 + stickFigure.armAngle, stickFigure.y + 20);
+            ctx.stroke();
+
+            // Draw legs
+            ctx.beginPath();
+            ctx.moveTo(stickFigure.x + stickFigure.width / 2, stickFigure.y + stickFigure.height / 2);
+            ctx.lineTo(stickFigure.x + stickFigure.width / 2 - 10 - stickFigure.legAngle, stickFigure.y + stickFigure.height);
+            ctx.moveTo(stickFigure.x + stickFigure.width / 2, stickFigure.y + stickFigure.height / 2);
+            ctx.lineTo(stickFigure.x + stickFigure.width / 2 + 10 + stickFigure.legAngle, stickFigure.y + stickFigure.height);
+            ctx.stroke();
+        }
+
+        function animate() {
+            const state = getState();
+            const action = chooseAction(state);
+            performAction(action);
+            applyPhysics();
+            const newState = getState();
+            updateQTable(state, action, newState, reward);
+            reward = 0;
+
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
