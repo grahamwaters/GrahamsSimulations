@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Binary Star System Simulation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        /* Global Styles */
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Header */
+        header {
+            padding: 10px;
+            background-color: #111;
+            text-align: center;
+            font-size: 1.5em;
+            flex-shrink: 0;
+        }
+
+        /* Main Content */
+        main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Canvas Container */
+        #simulation-container {
+            flex: 3;
+            position: relative;
+            background-color: #000;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Control Panel */
+        #control-panel {
+            flex: 1;
+            background-color: #222;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .control-group input[type="range"],
+        .control-group input[type="number"] {
+            width: 100%;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .toggle-group input {
+            margin-right: 10px;
+        }
+
+        .buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .buttons button {
+            flex: 1;
+            padding: 10px;
+            margin: 0 5px;
+            background-color: #444;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        .buttons button:hover {
+            background-color: #666;
+        }
+
+        /* Data Display */
+        #data-display {
+            background-color: #111;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+            color: #0af;
+        }
+
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: #333;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 10px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%; /* Position above the tooltip element */
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* Learn More Section */
+        #learn-more {
+            background-color: #111;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            main {
+                flex-direction: column;
+            }
+
+            #control-panel {
+                flex: none;
+                width: 100%;
+                height: 40%;
+            }
+
+            #simulation-container {
+                flex: none;
+                height: 60%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        Binary Star System Simulation
+    </header>
+    <main>
+        <div id="simulation-container">
+            <canvas id="simulation-canvas"></canvas>
+        </div>
+        <div id="control-panel">
+            <!-- Control Groups -->
+            <div class="control-group">
+                <label for="mass1">Mass of Star 1 (<span id="mass1-val">1</span> M☉) <span class="tooltip">ℹ️
+                    <span class="tooltiptext">Mass of the first star in solar masses.</span>
+                </span></label>
+                <input type="range" id="mass1" min="0.1" max="10" step="0.1" value="1">
+            </div>
+            <div class="control-group">
+                <label for="mass2">Mass of Star 2 (<span id="mass2-val">1</span> M☉) <span class="tooltip">ℹ️
+                    <span class="tooltiptext">Mass of the second star in solar masses.</span>
+                </span></label>
+                <input type="range" id="mass2" min="0.1" max="10" step="0.1" value="1">
+            </div>
+            <div class="control-group">
+                <label for="separation">Separation Distance (<span id="separation-val">1</span> AU) <span class="tooltip">ℹ️
+                    <span class="tooltiptext">Initial distance between the two stars in Astronomical Units.</span>
+                </span></label>
+                <input type="range" id="separation" min="0.5" max="5" step="0.1" value="1">
+            </div>
+            <div class="control-group">
+                <label for="velocity1">Initial Velocity of Star 1 (<span id="velocity1-val">0</span> AU/yr) <span class="tooltip">ℹ️
+                    <span class="tooltiptext">Initial velocity of the first star in Astronomical Units per year.</span>
+                </span></label>
+                <input type="range" id="velocity1" min="-2" max="2" step="0.1" value="0">
+            </div>
+            <div class="control-group">
+                <label for="velocity2">Initial Velocity of Star 2 (<span id="velocity2-val">0</span> AU/yr) <span class="tooltip">ℹ️
+                    <span class="tooltiptext">Initial velocity of the second star in Astronomical Units per year.</span>
+                </span></label>
+                <input type="range" id="velocity2" min="-2" max="2" step="0.1" value="0">
+            </div>
+
+            <!-- Toggles -->
+            <div class="toggle-group">
+                <input type="checkbox" id="toggle-trails" checked>
+                <label for="toggle-trails">Show Orbital Trails</label>
+            </div>
+            <div class="toggle-group">
+                <input type="checkbox" id="toggle-glow" checked>
+                <label for="toggle-glow">Show Star Glow</label>
+            </div>
+
+            <!-- Buttons -->
+            <div class="buttons">
+                <button id="pause-btn">Pause</button>
+                <button id="resume-btn" disabled>Resume</button>
+                <button id="reset-btn">Reset</button>
+            </div>
+
+            <!-- Data Display -->
+            <div id="data-display">
+                <p><strong>Distance Between Stars:</strong> <span id="distance">1.00</span> AU</p>
+                <p><strong>Gravitational Force:</strong> <span id="force">1.00</span> × 10<sup>30</sup> N</p>
+                <p><strong>Orbital Period:</strong> <span id="period">1.00</span> yr</p>
+            </div>
+
+            <!-- Learn More Section -->
+            <div id="learn-more">
+                <h3>Learn More</h3>
+                <p>Explore the fundamentals of gravitational force, orbital motion, and binary star dynamics through interactive simulations.</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        /*************************************************************
+         * Binary Star System Simulation
+         *
+         * This simulation models two stars orbiting their common
+         * center of mass using Newtonian gravitational physics.
+         * Users can adjust masses, separation distance, and initial
+         * velocities to explore various configurations.
+         *************************************************************/
+
+        // Canvas Setup
+        const canvas = document.getElementById('simulation-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Resize canvas to fit container
+        function resizeCanvas() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Simulation Parameters (Default Values)
+        let mass1 = 1; // Solar masses
+        let mass2 = 1; // Solar masses
+        let separation = 1; // Astronomical Units
+        let velocity1 = 0; // AU/year
+        let velocity2 = 0; // AU/year
+
+        // Gravitational Constant in AU^3 / (M☉ yr^2)
+        const G = 39.47841760435743;
+
+        // Stars Data
+        let star1 = {
+            mass: mass1,
+            position: { x: -separation * mass2 / (mass1 + mass2), y: 0 },
+            velocity: { x: velocity1, y: velocity1 }
+        };
+
+        let star2 = {
+            mass: mass2,
+            position: { x: separation * mass1 / (mass1 + mass2), y: 0 },
+            velocity: { x: velocity2, y: velocity2 }
+        };
+
+        // Trails
+        let trails1 = [];
+        let trails2 = [];
+
+        // Simulation Control
+        let animationId;
+        let isPaused = false;
+
+        // Time Step (years per frame)
+        const dt = 0.001;
+
+        // User Interface Elements
+        const mass1Slider = document.getElementById('mass1');
+        const mass2Slider = document.getElementById('mass2');
+        const separationSlider = document.getElementById('separation');
+        const velocity1Slider = document.getElementById('velocity1');
+        const velocity2Slider = document.getElementById('velocity2');
+
+        const mass1Val = document.getElementById('mass1-val');
+        const mass2Val = document.getElementById('mass2-val');
+        const separationVal = document.getElementById('separation-val');
+        const velocity1Val = document.getElementById('velocity1-val');
+        const velocity2Val = document.getElementById('velocity2-val');
+
+        const toggleTrails = document.getElementById('toggle-trails');
+        const toggleGlow = document.getElementById('toggle-glow');
+
+        const pauseBtn = document.getElementById('pause-btn');
+        const resumeBtn = document.getElementById('resume-btn');
+        const resetBtn = document.getElementById('reset-btn');
+
+        const distanceDisplay = document.getElementById('distance');
+        const forceDisplay = document.getElementById('force');
+        const periodDisplay = document.getElementById('period');
+
+        // Update Display Values
+        function updateDisplayValues() {
+            mass1Val.textContent = mass1;
+            mass2Val.textContent = mass2;
+            separationVal.textContent = separation;
+            velocity1Val.textContent = velocity1;
+            velocity2Val.textContent = velocity2;
+        }
+
+        updateDisplayValues();
+
+        // Event Listeners for Controls
+        mass1Slider.addEventListener('input', () => {
+            mass1 = parseFloat(mass1Slider.value);
+            star1.mass = mass1;
+            updateDisplayValues();
+            resetSimulation();
+        });
+
+        mass2Slider.addEventListener('input', () => {
+            mass2 = parseFloat(mass2Slider.value);
+            star2.mass = mass2;
+            updateDisplayValues();
+            resetSimulation();
+        });
+
+        separationSlider.addEventListener('input', () => {
+            separation = parseFloat(separationSlider.value);
+            updateDisplayValues();
+            resetSimulation();
+        });
+
+        velocity1Slider.addEventListener('input', () => {
+            velocity1 = parseFloat(velocity1Slider.value);
+            star1.velocity.x = velocity1;
+            updateDisplayValues();
+            resetSimulation();
+        });
+
+        velocity2Slider.addEventListener('input', () => {
+            velocity2 = parseFloat(velocity2Slider.value);
+            star2.velocity.x = velocity2;
+            updateDisplayValues();
+            resetSimulation();
+        });
+
+        // Toggle Event Listeners
+        toggleTrails.addEventListener('change', () => {
+            // Clear trails if toggled off
+            if (!toggleTrails.checked) {
+                trails1 = [];
+                trails2 = [];
+            }
+        });
+
+        // Button Event Listeners
+        pauseBtn.addEventListener('click', () => {
+            isPaused = true;
+            cancelAnimationFrame(animationId);
+            pauseBtn.disabled = true;
+            resumeBtn.disabled = false;
+        });
+
+        resumeBtn.addEventListener('click', () => {
+            if (isPaused) {
+                isPaused = false;
+                animate();
+                pauseBtn.disabled = false;
+                resumeBtn.disabled = true;
+            }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            resetSimulation();
+        });
+
+        // Initialize Stars
+        function initializeStars() {
+            // Calculate center of mass
+            const totalMass = mass1 + mass2;
+            star1.position = { x: -separation * mass2 / totalMass, y: 0 };
+            star2.position = { x: separation * mass1 / totalMass, y: 0 };
+
+            // Initialize velocities (Circular Orbit assumption)
+            const distance = separation;
+            const orbitalPeriod = Math.sqrt(Math.pow(distance, 3) / G / totalMass);
+            const velocityMagnitude = 2 * Math.PI * distance / orbitalPeriod;
+
+            // If velocities are not set by user, initialize for circular orbit
+            if (velocity1 === 0 && velocity2 === 0) {
+                star1.velocity = { x: 0, y: velocityMagnitude * mass2 / totalMass };
+                star2.velocity = { x: 0, y: -velocityMagnitude * mass1 / totalMass };
+            }
+        }
+
+        // Reset Simulation
+        function resetSimulation() {
+            trails1 = [];
+            trails2 = [];
+            initializeStars();
+            distanceDisplay.textContent = separation.toFixed(2);
+            forceDisplay.textContent = (G * mass1 * mass2).toExponential(2);
+            const period = Math.sqrt(Math.pow(separation, 3) / G / (mass1 + mass2));
+            periodDisplay.textContent = period.toFixed(2);
+        }
+
+        // Physics Calculations using Newtonian Gravity
+        function computeForces() {
+            const dx = star2.position.x - star1.position.x;
+            const dy = star2.position.y - star1.position.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const force = (G * star1.mass * star2.mass) / (distance * distance);
+
+            // Unit vector components
+            const ux = dx / distance;
+            const uy = dy / distance;
+
+            // Force vectors
+            const forceX = force * ux;
+            const forceY = force * uy;
+
+            return { forceX, forceY, distance };
+        }
+
+        // Update Positions and Velocities using Euler Integration
+        function updatePhysics() {
+            const { forceX, forceY, distance } = computeForces();
+
+            // Update velocities
+            star1.velocity.x += (forceX / star1.mass) * dt;
+            star1.velocity.y += (forceY / star1.mass) * dt;
+
+            star2.velocity.x -= (forceX / star2.mass) * dt;
+            star2.velocity.y -= (forceY / star2.mass) * dt;
+
+            // Update positions
+            star1.position.x += star1.velocity.x * dt;
+            star1.position.y += star1.velocity.y * dt;
+
+            star2.position.x += star2.velocity.x * dt;
+            star2.position.y += star2.velocity.y * dt;
+
+            // Update display data
+            distanceDisplay.textContent = distance.toFixed(2);
+            forceDisplay.textContent = (G * mass1 * mass2 / Math.pow(10, 30)).toFixed(2); // Scaled for readability
+
+            // Calculate Orbital Period using Kepler's Third Law
+            const orbitalPeriod = Math.sqrt(Math.pow(distance, 3) / G / (mass1 + mass2));
+            periodDisplay.textContent = orbitalPeriod.toFixed(2);
+        }
+
+        // Render Stars and Trails
+        function render() {
+            // Clear Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Scaling and Translation
+            const scale = Math.min(canvas.width, canvas.height) / (separation * 4);
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(scale, scale);
+
+            // Draw Trails if enabled
+            if (toggleTrails.checked) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.beginPath();
+                trails1.forEach((point, index) => {
+                    if (index === 0) ctx.moveTo(point.x, point.y);
+                    else ctx.lineTo(point.x, point.y);
+                });
+                ctx.stroke();
+
+                ctx.beginPath();
+                trails2.forEach((point, index) => {
+                    if (index === 0) ctx.moveTo(point.x, point.y);
+                    else ctx.lineTo(point.x, point.y);
+                });
+                ctx.stroke();
+            }
+
+            // Draw Stars
+            drawStar(star1, '#ffcc00');
+            drawStar(star2, '#00ccff');
+
+            ctx.restore();
+        }
+
+        // Draw a single star with optional glow
+        function drawStar(star, color) {
+            // Add current position to trails
+            if (toggleTrails.checked) {
+                trails1.push({ x: star1.position.x, y: star1.position.y });
+                trails2.push({ x: star2.position.x, y: star2.position.y });
+
+                // Limit trail length
+                if (trails1.length > 1000) trails1.shift();
+                if (trails2.length > 1000) trails2.shift();
+            }
+
+            // Star Appearance
+            const radius = Math.cbrt(star.mass); // Simple scaling for visual purposes
+
+            // Glow Effect
+            if (toggleGlow.checked) {
+                const gradient = ctx.createRadialGradient(star.position.x, star.position.y, radius, star.position.x, star.position.y, radius * 4);
+                gradient.addColorStop(0, color);
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(star.position.x, star.position.y, radius * 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Star Core
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(star.position.x, star.position.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Animation Loop
+        function animate() {
+            updatePhysics();
+            render();
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // Initialize and Start Simulation
+        resetSimulation();
+        animate();
+
+        /*************************************************************
+         * Accessibility Features:
+         * - Keyboard navigation can be enhanced by adding tabindex and
+         *   key event listeners as needed.
+         * - Screen-reader support is facilitated by proper labeling
+         *   and semantic HTML.
+         *************************************************************/
+
+    </script>
+</body>
+</html>
