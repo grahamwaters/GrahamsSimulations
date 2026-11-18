@@ -3,3 +3,4 @@ simulations/.DS_Store
 .gitignore
 *.gsheet
 .codegpt
+node_modules/
