@@ -20,6 +20,6 @@
   },
   "homepage": "https://github.com/grahamwaters/GrahamsSimulations#readme",
   "dependencies": {
-    "puppeteer": "^23.11.1"
+    "puppeteer": "^25.18.1"
   }
 }
